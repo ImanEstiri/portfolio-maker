@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest something this should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that is hard or impossible today? Describe the
+        situation rather than the solution — it usually leads somewhere better.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: >
+        This project generates a CV from facts the user entered, and rejects content it
+        cannot trace back to them. That constraint is the product.
+      options:
+        - label: This does not require inventing content the user did not provide
+          required: true

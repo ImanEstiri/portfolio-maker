@@ -1,0 +1,74 @@
+# cv-maker API (DEV).
+#
+# min_machines_running = 1 is not a cost oversight: the generation queue is an
+# in-memory Channel, so a scaled-to-zero machine drops queued work. The worker
+# re-enqueues Pending/Running rows at startup, but only if a machine comes back
+# — keeping one warm is the cheap half of that guarantee
+# (docs/ARCHITECTURE.md, "The job pipeline").
+#
+# This app holds no token signing key. It validates against the JWKS published by
+# cvmaker-authservice-dev (Auth__Authority below), so it can verify a token and
+# cannot mint one — which is the point, and what the architecture standard's
+# "exactly one service holds a signing key" rule requires.
+#
+# Secrets (flyctl secrets set -a cvmaker-api-dev):
+#   ConnectionStrings__Default
+#   ArtifactsStorage__StorageAccountUrl  — set automatically by the
+#                      provision-azure job in .github/workflows/flyio.yml;
+#                      the "generated-cvs" container is created by
+#                      infra/artifacts-storage (this app is not granted
+#                      container-create permissions).
+#   AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET — Fly.io has no
+#                      managed identity, so DefaultAzureCredential falls back
+#                      to this service principal, same as cvmaker-agentic-dev's
+#                      AzureAIFoundry secrets. Also set by provision-azure.
+#   Leaving ArtifactsStorage__StorageAccountUrl unset fails every generation
+#   job with FailureCause.StorageFailure — check for that after any deploy
+#   that touches these secrets.
+
+app = "cvmaker-api-dev"
+primary_region = "fra"
+
+[build]
+  dockerfile = "../src/CvMaker.Api/Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+  Templates__Root = "/app/templates"
+  Render__BaseUrl = "http://cvmaker-render-dev.flycast:8080"
+  Agentic__BaseUrl = "http://cvmaker-agentic-dev.flycast:8080"
+  # Public URL rather than .flycast, and deliberately. The proxy starts a stopped machine;
+  # .flycast would too, but the JWKS URI in the discovery document has to be one every
+  # validator can fetch from wherever it runs, and a browser-facing sign-in flow hits the same
+  # host. One address for both keeps them from drifting apart.
+  Auth__Authority = "https://cvmaker-authservice-dev.fly.dev"
+  Jwt__Issuer = "CvMaker"
+  Jwt__Audience = "CvMaker"
+
+  # CvMaker.Web is a WebAssembly app, so every call it makes is a cross-origin browser fetch.
+  # Without this the deployed product is inert while every /health is green.
+  Cors__AllowedOrigins__0 = "https://cvmaker-web-dev.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

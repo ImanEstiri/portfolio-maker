@@ -1,0 +1,101 @@
+@page "/login"
+@inject AuthClient Auth
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<PageTitle>Sign in</PageTitle>
+<h1>Sign in</h1>
+
+<EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+    <label>
+        Email
+        <InputText @bind-Value="_model.Email" type="email" autocomplete="username" />
+    </label>
+    <label>
+        Password
+        <InputText @bind-Value="_model.Password" type="password" autocomplete="current-password" />
+    </label>
+
+    @if (_error is not null)
+    {
+        <p class="error" role="alert">@_error</p>
+    }
+
+    @if (_notice is not null)
+    {
+        <p class="notice" role="status">@_notice</p>
+    }
+
+    <button type="submit" disabled="@_busy">@(_busy ? "Signing in…" : "Sign in")</button>
+</EditForm>
+
+<p>
+    <a href="@RegisterUrl">Create an account</a> ·
+    <a href="forgot-password">Forgot your password?</a>
+</p>
+
+@code {
+    private sealed class Model
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+
+    private readonly Model _model = new();
+    private string? _error;
+    private string? _notice;
+    private bool _busy;
+
+    /// <summary>Where to go after signing in, set by the guard that redirected here.</summary>
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private string RegisterUrl =>
+        string.IsNullOrWhiteSpace(ReturnUrl)
+            ? "register"
+            : $"register?returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+
+        var result = await Auth.LoginAsync(_model.Email, _model.Password);
+
+        _busy = false;
+
+        switch (result.Outcome)
+        {
+            case AuthOutcome.Succeeded when Tokens.IsAuthenticated:
+                Nav.NavigateTo(Destination());
+                break;
+
+            case AuthOutcome.TwoFactorRequired:
+                // The challenge token is useless for anything but completing this sign-in, so
+                // it can ride in the URL to the second-factor page.
+                Nav.NavigateTo($"two-factor?challenge={Uri.EscapeDataString(result.ChallengeToken!)}" +
+                               $"&returnUrl={Uri.EscapeDataString(Destination())}");
+                break;
+
+            case AuthOutcome.EmailVerificationRequired:
+                _notice = result.Error;
+                break;
+
+            default:
+                _error = result.Error ?? "Sign-in failed.";
+                break;
+        }
+    }
+
+    // Only relative paths. A returnUrl is attacker-controllable, and letting it name an
+    // absolute URL turns this form into an open redirect.
+    private string Destination()
+    {
+        if (string.IsNullOrWhiteSpace(ReturnUrl)) return "profile";
+
+        return Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "profile";
+    }
+}

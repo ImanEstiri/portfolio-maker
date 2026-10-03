@@ -1,0 +1,46 @@
+# cv-maker agent plane (DEV).
+#
+# Private-only, like the renderer: it is called solely by the API. It needs the
+# Azure credentials below to reach the model, but that is not a credential
+# boundary: the API app is given the same service principal for blob storage.
+#
+# With no AzureAIFoundry__Endpoint set, the service runs on the deterministic
+# mock runtime and produces mock CVs. That is correct for a scratch environment
+# and catastrophic if it happens unnoticed in front of users, so the service
+# logs an error when the runtime is first used outside Development and
+# GET /api/runtime reports which backend is live. Call it after any deploy that
+# touches these secrets.
+#
+# Secrets (flyctl secrets set -a cvmaker-agentic-dev):
+#   AzureAIFoundry__Endpoint
+#   AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET  (when not using managed identity)
+
+app = "cvmaker-agentic-dev"
+primary_region = "fra"
+
+[build]
+  dockerfile = "../src/CvMaker.Agentic/Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+  Agents__Root = "/app/agents"
+  Flows__Root = "/app/flows"
+  AzureAIFoundry__UseManagedIdentity = "false"
+  AzureAIFoundry__ModelDeploymentName = "gpt-4.1"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

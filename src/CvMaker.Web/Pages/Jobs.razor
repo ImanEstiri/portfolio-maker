@@ -1,0 +1,64 @@
+@page "/jobs"
+@inject CvMakerApiClient Api
+@inject IJSRuntime Js
+@inject TokenStore Tokens
+
+<PageTitle>Your documents</PageTitle>
+<h1>Your documents</h1>
+
+<RequireAuth Message="Sign in to see your documents.">
+
+    @if (_jobs is null)
+    {
+        <p>Loading…</p>
+    }
+    else if (_jobs.Count == 0)
+    {
+        <p>Nothing generated yet. <NavLink href="generate">Make one</NavLink>.</p>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr><th>Created</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var job in _jobs)
+                {
+                    <tr>
+                        <td>@job.CreatedAt.ToLocalTime().ToString("g")</td>
+                        <td>@job.Status @(job.Error is null ? "" : $"— {job.Error}")</td>
+                        <td>
+                            @if (job.Status == JobStatus.Completed)
+                            {
+                                <button type="button" class="link" @onclick="() => DownloadAsync(job.Id)">PDF</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+</RequireAuth>
+
+@code {
+    private List<JobDto>? _jobs;
+
+    private async Task DownloadAsync(Guid jobId)
+    {
+        var pdf = await Api.DownloadPdfAsync(jobId);
+        if (pdf is not null)
+            await Js.InvokeVoidAsync("cvMakerDownload", $"cv-{jobId}.pdf", Convert.ToBase64String(pdf));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Without this a signed-out visitor got an empty list, which says "you have no
+        // documents" to someone who has several.
+        if (!Tokens.IsAuthenticated) return;
+
+        try { _jobs = [.. await Api.GetJobsAsync()]; }
+        catch (HttpRequestException) { _jobs = []; }
+    }
+}

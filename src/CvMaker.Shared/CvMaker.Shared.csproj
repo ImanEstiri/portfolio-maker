@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Contracts shared between CvMaker.Api and the Blazor client. Kept free of
+    dependencies so the WASM client does not drag EF Core or Scriban into the
+    browser download.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>CvMaker.Shared</RootNamespace>
+  </PropertyGroup>
+
+</Project>

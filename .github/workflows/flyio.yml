@@ -1,0 +1,294 @@
+name: Fly deploy
+
+# Tag-triggered: change detection picks which apps moved, then deploys in
+# dependency order — CvMaker.Render / CvMaker.Agentic have no runtime dependency
+# on each other, CvMaker.Api needs to land after the two backends it calls over
+# flycast, and CvMaker.Web goes last since it is the one thing an end user hits
+# directly.
+#
+# Postgres (flyio/postgres.fly.toml) is deliberately not deployed here: it
+# holds data, so bringing it up is a one-time operator action
+# (`flyctl deploy --config flyio/postgres.fly.toml`), not something a code
+# push should ever trigger.
+#
+# Auth is an app cv-maker deploys but does not build: flyio/authservice.fly.toml
+# pulls a pinned konradcinkusz/authservice image from GHCR. That repository
+# publishes an image and never deploys itself, so the deployment belongs here,
+# next to the apps that depend on it. It goes out before CvMaker.Api, which
+# validates every token against its JWKS.
+#
+# provision-azure provisions the Azure OpenAI + AI Foundry + Blob Storage
+# resources CvMaker.Agentic and CvMaker.Api need (infra/main.bicep), then
+# deploy-agentic/deploy-api pass the results to those apps as Fly secrets.
+# It runs unconditionally on every tag push: the bicep deployment is
+# idempotent, so re-running it just confirms the resources are still there.
+#
+# Requires the FLY_API_TOKEN secret (`flyctl tokens create deploy -x 999999h`)
+# plus, for provision-azure: AZURE_CREDENTIALS (JSON blob for azure/login@v2 —
+# { clientId, clientSecret, tenantId, subscriptionId }) and
+# AZURE_SUBSCRIPTION_ID secrets, and AZURE_LOCATION (e.g. "eastus2") plus
+# optionally AZURE_ENV_NAME variables. See README.md "Release & deployment".
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: "Deploy every app regardless of what changed"
+        type: boolean
+        default: false
+
+# Read-only by default. Every job here authenticates to Fly and Azure with its own secrets,
+# so none of them needs anything from the GITHUB_TOKEN beyond reading the repository — and a
+# deploy workflow is the last place to leave it with write access it never uses.
+permissions:
+  contents: read
+
+concurrency:
+  group: flyio-deploy
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    name: Detect changed apps
+    runs-on: ubuntu-latest
+    outputs:
+      render: ${{ steps.filter.outputs.render == 'true' || inputs.deploy_all == true }}
+      agentic: ${{ steps.filter.outputs.agentic == 'true' || inputs.deploy_all == true }}
+      api: ${{ steps.filter.outputs.api == 'true' || inputs.deploy_all == true }}
+      web: ${{ steps.filter.outputs.web == 'true' || inputs.deploy_all == true }}
+      authservice: ${{ steps.filter.outputs.authservice == 'true' || inputs.deploy_all == true }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # A tag can point anywhere, so diff against the previous commit
+          # rather than relying on the default pull_request base.
+          base: HEAD^
+          filters: |
+            render:
+              - 'src/CvMaker.Render/**'
+              - 'flyio/render.fly.toml'
+            agentic:
+              - 'src/CvMaker.Agentic/**'
+              - 'flyio/agentic.fly.toml'
+            api:
+              - 'src/CvMaker.Api/**'
+              - 'src/CvMaker.Core/**'
+              - 'src/CvMaker.Shared/**'
+              - 'templates/**'
+              - 'flyio/api.fly.toml'
+            web:
+              - 'src/CvMaker.Web/**'
+              - 'src/CvMaker.Shared/**'
+              - 'flyio/web.fly.toml'
+            # No source paths: the image is built elsewhere, so the config is the
+            # only thing in this repository that can change it — including the
+            # pinned authservice version.
+            authservice:
+              - 'flyio/authservice.fly.toml'
+
+  # ============================================================
+  # PROVISION — Azure resources (infra/main.bicep)
+  # Runs unconditionally and in parallel with change detection: it is cheap
+  # and idempotent, and deploy-agentic/deploy-api both need its outputs.
+  # ============================================================
+  provision-azure:
+    name: Provision Azure Resources
+    runs-on: ubuntu-latest
+    outputs:
+      azure_ai_foundry_endpoint: ${{ steps.azure-outputs.outputs.azure_ai_foundry_endpoint }}
+      artifacts_storage_url: ${{ steps.azure-outputs.outputs.artifacts_storage_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get service principal object ID
+        id: sp-info
+        run: |
+          SP_OBJECT_ID=$(az ad sp show --id "${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}" --query id -o tsv)
+          if [ -z "$SP_OBJECT_ID" ]; then
+            echo "ERROR: Failed to resolve service principal object ID from AZURE_CREDENTIALS.clientId."
+            exit 1
+          fi
+          echo "sp_object_id=$SP_OBJECT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Azure resources (Bicep)
+        run: |
+          az deployment sub create \
+            --name "cvmaker-azure-resources" \
+            --location "${{ vars.AZURE_LOCATION }}" \
+            --template-file infra/main.bicep \
+            --parameters \
+              environmentName="${{ vars.AZURE_ENV_NAME || 'cvmaker-flyio-dev' }}" \
+              location="${{ vars.AZURE_LOCATION }}" \
+              principalId="${{ steps.sp-info.outputs.sp_object_id }}"
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Extract Bicep outputs
+        id: azure-outputs
+        run: |
+          set -euo pipefail
+
+          OUTPUTS=$(az deployment sub show \
+            --name "cvmaker-azure-resources" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --query properties.outputs \
+            -o json)
+
+          # ARM lowercases the first segment of each output key, so normalize
+          # all keys to lowercase before parsing.
+          O=$(echo "$OUTPUTS" | jq 'with_entries(.key |= ascii_downcase)')
+
+          FOUNDRY_ENDPOINT=$(echo "$O" | jq -r '.azure_ai_foundry_endpoint.value')
+          STORAGE_URL=$(echo "$O" | jq -r '.artifacts_storage_account_url.value')
+
+          if [ -z "$FOUNDRY_ENDPOINT" ] || [ "$FOUNDRY_ENDPOINT" = "null" ]; then
+            echo "ERROR: azure_ai_foundry_endpoint output is empty. The deployment likely failed."
+            exit 1
+          fi
+          if [ -z "$STORAGE_URL" ] || [ "$STORAGE_URL" = "null" ]; then
+            echo "ERROR: artifacts_storage_account_url output is empty. The deployment likely failed."
+            exit 1
+          fi
+
+          {
+            echo "azure_ai_foundry_endpoint<<EOF"
+            echo "$FOUNDRY_ENDPOINT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "artifacts_storage_url<<EOF"
+            echo "$STORAGE_URL"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  deploy-render:
+    name: Deploy CvMaker.Render
+    needs: changes
+    if: needs.changes.outputs.render == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      - run: flyctl deploy --config flyio/render.fly.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-agentic:
+    name: Deploy CvMaker.Agentic
+    needs: [changes, provision-azure]
+    if: needs.changes.outputs.agentic == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Azure secrets
+        run: |
+          flyctl secrets set \
+            "AzureAIFoundry__Endpoint=${{ needs.provision-azure.outputs.azure_ai_foundry_endpoint }}" \
+            "AZURE_TENANT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}" \
+            "AZURE_CLIENT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}" \
+            "AZURE_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}" \
+            --config flyio/agentic.fly.toml \
+            --stage
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - run: flyctl deploy --config flyio/agentic.fly.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-authservice:
+    name: Deploy authservice
+    needs: changes
+    if: needs.changes.outputs.authservice == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+
+      # Nothing is built here: [build.image] pulls a published GHCR image, so --remote-only has
+      # no build to redirect. Secrets (the connection string and the RSA private key) are set
+      # once by an operator, not by CI — CI never sees the signing key.
+      - run: flyctl deploy --config flyio/authservice.fly.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # A deploy that comes up without a usable key set would leave every API request
+      # failing to validate, with the API looking healthy. Cheaper to catch it here.
+      - name: The published key set is usable
+        run: |
+          url="https://cvmaker-authservice-dev.fly.dev/.well-known/jwks.json"
+
+          for i in $(seq 1 20); do
+            if curl -fsS "$url" -o /tmp/jwks.json; then break; fi
+            sleep 3
+          done
+
+          cat /tmp/jwks.json
+
+          count=$(python3 -c "import json;print(len(json.load(open('/tmp/jwks.json'))['keys']))")
+          if [ "$count" -eq 0 ]; then
+            echo "::error::JWKS is empty — authservice is still signing with a shared secret. Set Jwt__PrivateKeyPem."
+            exit 1
+          fi
+          echo "authservice publishes $count signing key(s)"
+
+  deploy-api:
+    name: Deploy CvMaker.Api
+    needs: [changes, deploy-render, deploy-agentic, deploy-authservice, provision-azure]
+    # needs' jobs are allowed to be skipped (not failed) — Api goes out
+    # whenever it changed OR either backend it depends on redeployed.
+    if: "always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.api == 'true' || needs.changes.outputs.render == 'true' || needs.changes.outputs.agentic == 'true' || needs.changes.outputs.authservice == 'true')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Azure secrets
+        run: |
+          flyctl secrets set \
+            "ArtifactsStorage__StorageAccountUrl=${{ needs.provision-azure.outputs.artifacts_storage_url }}" \
+            "AZURE_TENANT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}" \
+            "AZURE_CLIENT_ID=${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}" \
+            "AZURE_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}" \
+            --config flyio/api.fly.toml \
+            --stage
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - run: flyctl deploy --config flyio/api.fly.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-web:
+    name: Deploy CvMaker.Web
+    needs: [changes, deploy-api]
+    if: "always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.api == 'true')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      - run: flyctl deploy --config flyio/web.fly.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

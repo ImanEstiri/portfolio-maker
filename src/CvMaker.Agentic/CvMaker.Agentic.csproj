@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The agent plane, kept apart from CvMaker.Api so the model backend sits behind
+    one internal HTTP interface that only the API calls, and so token spend can be
+    scaled and timed out separately from request volume. It is a seam, not a
+    credential boundary: on Fly the two share one Azure service principal
+    (docs/ARCHITECTURE.md, "Services and why they are separate").
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>CvMaker.Agentic</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
+    <PackageReference Include="Azure.Identity" Version="1.16.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CvMaker.Shared\CvMaker.Shared.csproj" />
+  </ItemGroup>
+
+  <!--
+    The orchestrator's parser and the fence stripper are internal: they are
+    implementation detail, not part of this service's HTTP surface. The tests
+    assert on them directly because they are where malformed model output is
+    caught, so they are exposed to the test assembly rather than made public.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="CvMaker.Tests" />
+  </ItemGroup>
+
+  <!-- Agent and flow definitions are data: read once on first use, versioned in
+       git, and reviewable as a diff when a prompt changes. -->
+  <ItemGroup>
+    <Content Update="agents\**\*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Update="flows\*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

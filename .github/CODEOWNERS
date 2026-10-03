@@ -1,0 +1,20 @@
+# Default owner for everything.
+*                                   @konradcinkusz
+
+# Security-relevant paths, listed separately so a change to one is visible as such in
+# the review queue rather than blending into a large diff.
+
+# The LaTeX injection boundary. A change here is a change to the security model.
+/src/CvMaker.Core/Latex/            @konradcinkusz
+/tests/CvMaker.Tests/LatexEscaperTests.cs  @konradcinkusz
+
+# The sandbox the renderer runs in, and the proofs that it holds.
+/src/CvMaker.Render/Dockerfile      @konradcinkusz
+/src/CvMaker.Render/LatexCompiler.cs @konradcinkusz
+
+# Token validation, CORS, and the ownership checks.
+/src/CvMaker.Api/Auth/              @konradcinkusz
+
+# Deployment topology and anything that decides where a secret goes.
+/flyio/                             @konradcinkusz
+/.github/workflows/                 @konradcinkusz

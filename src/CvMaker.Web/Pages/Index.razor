@@ -1,0 +1,30 @@
+@page "/"
+
+<PageTitle>cv-maker</PageTitle>
+
+<h1>A CV tailored to the job, without the LaTeX</h1>
+
+<p class="lede">
+    Enter your history once. Paste a job posting. Pick a template. Get a typeset PDF.
+</p>
+
+<section class="cards">
+    <article>
+        <h2>1. Your facts</h2>
+        @* Was "or paste your LinkedIn page and let it be extracted". There is no extraction:
+           no endpoint accepts a LinkedIn page or an uploaded CV, and the profile-extractor
+           agent is not reachable from any route. Advertising it set every new visitor up to
+           look for a feature that does not exist. *@
+        <p>Type your history in, one fact per achievement. It stays editable.</p>
+        <NavLink class="button" href="profile">Build your profile</NavLink>
+    </article>
+    <article>
+        <h2>2. The posting</h2>
+        <p>Paste the advert. It is read to work out what the employer screens for — never to invent experience you do not have.</p>
+    </article>
+    <article>
+        <h2>3. The PDF</h2>
+        <p>Typeset properly, in the template you pick. There is an ATS-safe layout for the systems that mangle two-column CVs.</p>
+        <NavLink class="button" href="generate">Generate</NavLink>
+    </article>
+</section>

@@ -1,0 +1,28 @@
+{
+  "id": "ats-plain",
+  "displayName": "ATS-safe plain",
+  "description": "Single-column, no graphics, no icons. Built to survive applicant tracking systems that mangle two-column layouts.",
+  "engine": "lualatex",
+
+  "atsRating": "excellent",
+
+  "capabilities": {
+    "photo": false,
+    "twoColumn": false,
+    "publications": false,
+    "skillBars": false,
+    "colourAccent": false,
+    "links": true
+  },
+
+  "pageBudget": {
+    "target": 2,
+    "max": 3
+  },
+
+  "notes": [
+    "Only base LaTeX packages — compiles under lualatex and pdflatex alike.",
+    "Every slot is bound pre-escaped by CvMaker.Core.Binding.TemplateBinder.",
+    "capabilities are handed to cv-composer so it never writes content this layout cannot hold."
+  ]
+}

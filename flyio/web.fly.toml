@@ -1,0 +1,45 @@
+# cv-maker Blazor client (DEV).
+#
+# Static assets behind nginx, so this can scale to zero freely — a cold start
+# costs one container boot and no state.
+
+app = "cvmaker-web-dev"
+primary_region = "fra"
+
+[build]
+  dockerfile = "../src/CvMaker.Web/Dockerfile"
+
+[env]
+  # Injected into appsettings.json at container start — the browser fetches
+  # this, so it cannot come from the server's environment at request time.
+  API_BASE_URL = "https://cvmaker-api-dev.fly.dev"
+  # The authservice instance this product runs (flyio/authservice.fly.toml). The browser
+  # posts registration and sign-in here directly, so it must be the public URL and it must
+  # be listed in that app's Cors__AllowedOrigins.
+  AUTH_BASE_URL = "https://cvmaker-authservice-dev.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 400
+    soft_limit = 300
+
+# A dedicated endpoint, not /index.html: nginx serves the index happily even when the WASM
+# bundle behind it is broken, so a check pointed there passes on a white screen. /healthz is
+# served by nginx.conf and exists only to be checked.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

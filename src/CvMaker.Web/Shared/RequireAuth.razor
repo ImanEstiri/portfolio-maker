@@ -1,0 +1,52 @@
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+@implements IDisposable
+
+@if (!Tokens.IsRestored)
+{
+    @* The startup refresh has not finished. Rendering the signed-out prompt here would flash
+       it at every returning user before swapping it out. *@
+    <p class="muted">Loading…</p>
+}
+else if (Tokens.IsAuthenticated)
+{
+    @ChildContent
+}
+else
+{
+    <div class="signed-out" role="status">
+        <h2>You are not signed in</h2>
+        <p>@(Message ?? "Sign in to see this page.")</p>
+        <p>
+            <a class="button" href="@LoginUrl">Sign in</a>
+            <a href="@RegisterUrl">or create an account</a>
+        </p>
+    </div>
+}
+
+@code {
+    // Wraps any page that needs a token.
+    //
+    // Nothing guarded routes before this: a signed-out visitor got the page, which called an
+    // API that 401'd, and each page then rendered its own misleading version of the failure —
+    // "This service holds: 0 profile(s)" to someone with data, "Could not load your profile"
+    // as though the server were broken, "Loading templates…" forever. None of them said the
+    // one thing that was actually true.
+    //
+    // The return URL rides along so signing in lands back where the user was trying to go,
+    // rather than dumping everyone on the profile page.
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Page-specific explanation, e.g. "Sign in to see your documents."</summary>
+    [Parameter] public string? Message { get; set; }
+
+    private string LoginUrl => $"login?returnUrl={Uri.EscapeDataString(CurrentPath)}";
+    private string RegisterUrl => $"register?returnUrl={Uri.EscapeDataString(CurrentPath)}";
+
+    private string CurrentPath => Nav.ToBaseRelativePath(Nav.Uri);
+
+    protected override void OnInitialized() => Tokens.Changed += StateHasChanged;
+
+    public void Dispose() => Tokens.Changed -= StateHasChanged;
+}

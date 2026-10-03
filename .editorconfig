@@ -1,0 +1,57 @@
+# Formatting only. The language rules — nullable, warnings-as-errors, analysis
+# level — live in Directory.Build.props, which applies to builds rather than to
+# whichever editor a contributor happens to open the file in.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{json,yml,yaml,csproj,props,targets,razor,html,css,js}]
+indent_size = 2
+
+[*.{md,tex,scriban}]
+# Two trailing spaces are a hard line break in Markdown, and TeX and template
+# sources are whitespace-sensitive in places.
+trim_trailing_whitespace = false
+
+[*.sh]
+indent_size = 2
+end_of_line = lf
+
+[Makefile]
+indent_style = tab
+
+[*.cs]
+# ── using directives ────────────────────────────────────────────────────────
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:suggestion
+
+# ── namespaces and braces ───────────────────────────────────────────────────
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_prefer_braces = when_multiline:suggestion
+csharp_new_line_before_open_brace = all
+
+# ── expression preferences ──────────────────────────────────────────────────
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = true:suggestion
+
+# ── naming ──────────────────────────────────────────────────────────────────
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_prefix
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.underscore_prefix.required_prefix = _
+dotnet_naming_style.underscore_prefix.capitalization = camel_case

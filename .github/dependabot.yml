@@ -1,0 +1,90 @@
+version: 2
+
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per family rather than one per package: Microsoft.* and Azure.* move
+      # together, and splitting them produces PRs that cannot pass CI on their own.
+      microsoft:
+        patterns: ["Microsoft.*", "System.*"]
+      azure:
+        patterns: ["Azure.*"]
+    ignore:
+      # These ship in step with the target framework (net9.0, Directory.Build.props): a new
+      # major means a different runtime, so it is a deliberate framework upgrade done once
+      # and in full, not a weekly package bump that leaves the solution half on 9 and half
+      # on 10. Minor and patch updates still arrive.
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Npgsql.EntityFrameworkCore.PostgreSQL"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  # One entry per Dockerfile — Dependabot does not recurse. The render image matters
+  # most: it pulls a large apt surface and goes stale fastest.
+  - package-ecosystem: docker
+    directory: "/src/CvMaker.Render"
+    schedule:
+      interval: weekly
+    ignore:
+      # Same reason as the NuGet entry: the projects target net9.0, so a 10.0 base image is a
+      # framework upgrade, not a patch. Patch and minor image updates still arrive.
+      - dependency-name: "dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: "/src/CvMaker.Api"
+    schedule:
+      interval: weekly
+    ignore:
+      # Same reason as the NuGet entry: the projects target net9.0, so a 10.0 base image is a
+      # framework upgrade, not a patch. Patch and minor image updates still arrive.
+      - dependency-name: "dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: "/src/CvMaker.Agentic"
+    schedule:
+      interval: weekly
+    ignore:
+      # Same reason as the NuGet entry: the projects target net9.0, so a 10.0 base image is a
+      # framework upgrade, not a patch. Patch and minor image updates still arrive.
+      - dependency-name: "dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: "/src/CvMaker.Web"
+    schedule:
+      interval: weekly
+    ignore:
+      # The SDK image only builds the WebAssembly bundle, but it must match the framework the
+      # project targets. The nginx image that serves it is still updated.
+      - dependency-name: "dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: "/docker/postgres"
+    schedule:
+      interval: weekly
+    ignore:
+      # A Postgres major version cannot open the previous major's data directory. Bumping the
+      # tag would leave anyone with an existing volume — a contributor's local one, or the
+      # deployed one — with a database that refuses to start. Upgrading is a dump and restore,
+      # done on purpose. Minor and patch releases still arrive.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]

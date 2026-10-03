@@ -1,0 +1,87 @@
+@page "/two-factor"
+@inject AuthClient Auth
+@inject TokenStore Tokens
+@inject NavigationManager Nav
+
+<PageTitle>Two-step verification</PageTitle>
+<h1>Two-step verification</h1>
+
+@if (string.IsNullOrWhiteSpace(Challenge))
+{
+    <p class="error" role="alert">
+        This page is reached during sign-in. <a href="login">Start there</a>.
+    </p>
+}
+else
+{
+    <p>Enter the six-digit code from your authenticator app.</p>
+
+    <EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+        <label>
+            Code
+            <InputText @bind-Value="_model.Code" autocomplete="one-time-code" inputmode="numeric" />
+        </label>
+
+        <label class="checkbox">
+            <InputCheckbox @bind-Value="_model.UseRecoveryCode" />
+            This is a recovery code, not an app code
+        </label>
+
+        @if (_error is not null)
+        {
+            <p class="error" role="alert">@_error</p>
+        }
+
+        <button type="submit" disabled="@_busy">@(_busy ? "Checking…" : "Verify")</button>
+    </EditForm>
+}
+
+@code {
+    // The challenge token is scoped to completing this one sign-in and cannot be used as an
+    // access token, which is why it is safe to carry it here in the URL.
+
+    private sealed class Model
+    {
+        public string Code { get; set; } = string.Empty;
+        public bool UseRecoveryCode { get; set; }
+    }
+
+    private readonly Model _model = new();
+    private string? _error;
+    private bool _busy;
+
+    [SupplyParameterFromQuery(Name = "challenge")]
+    public string? Challenge { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        var result = await Auth.CompleteTwoFactorAsync(
+            Challenge!, _model.UseRecoveryCode ? null : _model.Code,
+            _model.UseRecoveryCode ? _model.Code : null);
+
+        _busy = false;
+
+        if (result.Outcome == AuthOutcome.Succeeded && Tokens.IsAuthenticated)
+        {
+            Nav.NavigateTo(Destination());
+            return;
+        }
+
+        _error = result.Error ?? "That code was not accepted.";
+    }
+
+    private string Destination()
+    {
+        if (string.IsNullOrWhiteSpace(ReturnUrl)) return "profile";
+
+        return Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "profile";
+    }
+}

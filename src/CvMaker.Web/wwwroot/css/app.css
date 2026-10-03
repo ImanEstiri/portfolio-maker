@@ -1,0 +1,140 @@
+/* Deliberately small and system-font based. The product's value is the PDF, not
+   the chrome around it, and a WASM download is already heavy enough without a
+   CSS framework on top. */
+
+:root {
+    --bg: #fbfaf8;
+    --fg: #23201d;
+    --muted: #6b6560;
+    --line: #e3ded7;
+    --accent: #8f0d0d;
+    --ok: #1f6f43;
+    --card: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1a1817; --fg: #ece8e3; --muted: #a49d95;
+        --line: #35302b; --accent: #e08585; --ok: #6cc5a1; --card: #221f1d;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header { border-bottom: 1px solid var(--line); }
+
+nav {
+    max-width: 60rem; margin: 0 auto; padding: .75rem 1rem;
+    display: flex; align-items: center; gap: 1.5rem;
+}
+
+nav .brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+nav .links { display: flex; gap: 1rem; flex: 1; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover, nav a.active { color: var(--accent); }
+
+main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+footer { max-width: 60rem; margin: 0 auto; padding: 1rem; color: var(--muted); }
+
+h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.15rem; margin: 1.75rem 0 .5rem; }
+.lede { color: var(--muted); max-width: 44rem; }
+.hint, .note, .optional { color: var(--muted); font-size: .9rem; }
+.note { border-left: 3px solid var(--accent); padding-left: .75rem; }
+
+section.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+section.cards article { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+
+label { display: block; margin: .6rem 0; }
+label > input, label > select, label > textarea, textarea {
+    display: block; width: 100%; margin-top: .2rem; padding: .5rem;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit;
+}
+
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+legend { padding: 0 .4rem; color: var(--muted); }
+
+.fact { border-top: 1px solid var(--line); padding-top: .75rem; margin-top: .75rem; }
+.row { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+
+button, .button {
+    display: inline-block; padding: .55rem 1rem; border-radius: 6px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    font: inherit; cursor: pointer; text-decoration: none;
+}
+button:disabled { opacity: .55; cursor: default; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; text-decoration: underline; }
+
+.templates { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+.template {
+    text-align: left; background: var(--card); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px; padding: .75rem;
+    display: flex; flex-direction: column; gap: .3rem;
+}
+.template.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.template .desc { color: var(--muted); font-size: .85rem; }
+.ats { font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+.ats-excellent { color: var(--ok); }
+.ats-fair, .ats-poor { color: var(--accent); }
+
+.progress { margin-top: 1rem; }
+progress { width: 100%; height: .5rem; }
+
+.error { color: var(--accent); }
+.ok { color: var(--ok); }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--line); }
+
+.boot { padding: 2rem; color: var(--muted); }
+
+#blazor-error-ui {
+    display: none; position: fixed; bottom: 0; width: 100%;
+    padding: .8rem 1rem; background: #f7e8e8; color: #4a1b0c;
+}
+
+.review {
+    margin-top: 1rem; padding: .9rem 1rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+.review h3 { margin: 0 0 .4rem; font-size: 1rem; }
+
+/* ── Account and legal screens ──────────────────────────────────────────── */
+
+/* Shown by RequireAuth in place of a guarded page. Deliberately looks like content
+   rather than an error: not being signed in is an ordinary state, not a fault. */
+.signed-out {
+    max-width: 34rem; padding: 1.5rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+.signed-out h2 { margin-top: 0; }
+
+.notice { color: var(--ok); }
+
+/* Where "Sign out" would be when DevUser is configured. Dashed and accent-coloured on
+   purpose: it has to read as a warning about the build, not as a normal account state. */
+.dev-user {
+    font-size: .85rem; padding: .15rem .6rem; white-space: nowrap;
+    border: 1px dashed var(--accent); border-radius: 999px; color: var(--accent);
+}
+
+/* The consent checkbox needs the label on one line with the box, which the stacked
+   label layout used by every other field would break. */
+label.checkbox {
+    display: flex; flex-direction: row; align-items: flex-start; gap: .5rem;
+    font-weight: normal;
+}
+label.checkbox input { margin-top: .25rem; }
+
+footer nav.legal { display: block; margin-top: .5rem; font-size: .85rem; }
+
+/* Long-form policy text reads badly at full page width. */
+.policy, h2 + p, h2 + ul { max-width: 42rem; }

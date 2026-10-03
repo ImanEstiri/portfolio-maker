@@ -1,0 +1,268 @@
+@page "/generate"
+@inject CvMakerApiClient Api
+@inject IJSRuntime Js
+@implements IDisposable
+@inject TokenStore Tokens
+
+<PageTitle>Generate</PageTitle>
+<h1>Generate a CV</h1>
+
+<RequireAuth Message="Sign in to generate a CV.">
+
+    @if (_templates.Count == 0)
+    {
+        <p>Loading templates…</p>
+    }
+    else
+    {
+        <section>
+            <h2>1. Choose a template</h2>
+            <div class="templates">
+                @foreach (var t in _templates)
+                {
+                    <button type="button"
+                            class="template @(t.Id == _templateId ? "selected" : "")"
+                            @onclick="() => _templateId = t.Id">
+                        <strong>@t.DisplayName</strong>
+                        <span class="ats ats-@t.AtsRating">ATS: @t.AtsRating</span>
+                        <span class="desc">@t.Description</span>
+                    </button>
+                }
+            </div>
+            @if (_templates.FirstOrDefault(t => t.Id == _templateId) is { AtsRating: "fair" or "poor" })
+            {
+                <p class="note">
+                    This layout looks good to a person but parses less reliably in applicant tracking
+                    systems. If you are applying through a large employer's portal, the ATS-safe
+                    template is the safer choice.
+                </p>
+            }
+        </section>
+
+        <section>
+            <h2>2. Paste the job posting <span class="optional">(optional)</span></h2>
+            @if (_quota is not null)
+            {
+                <p class="hint">
+                    @if (_quota.Remaining > 0)
+                    {
+                        <span><strong>@_quota.Remaining</strong> of @_quota.Limit tailored generations left this month.</span>
+                    }
+                    else
+                    {
+                        <span class="error">
+                            You have used all @_quota.Limit tailored generations this month. They renew on
+                            @_quota.RenewsAt.ToLocalTime().ToString("d"). A CV without a posting is still free.
+                        </span>
+                    }
+                </p>
+            }
+            <p class="hint">
+                With a posting, your facts are reordered and reworded to match what the employer asks for.
+                Without one, you get a straight CV from your profile.
+            </p>
+            <textarea @bind="_postingText" rows="10" placeholder="Paste the whole advert here…"></textarea>
+        </section>
+
+        <section>
+            <button type="button" @onclick="StartAsync" disabled="@(_running || _templateId is null)">
+                @(_running ? "Working…" : "Generate PDF")
+            </button>
+
+            @if (_job is not null)
+            {
+                <div class="progress" role="status">
+                    <p><strong>@StageLabel(_job.Stage)</strong></p>
+                    <progress value="@_job.Progress" max="1"></progress>
+
+                    @if (_job.Status == JobStatus.Completed)
+                    {
+                        <p class="ok">Done.</p>
+                        <button type="button" class="button" @onclick="() => DownloadAsync(_job.Id)">Download PDF</button>
+
+                        @if (_job.AtsReview is { } review)
+                        {
+                            <div class="review">
+                                <h3>How it matches the posting</h3>
+                                <p><strong>@review.KeywordCoverage%</strong> of the posting's key terms appear in your CV.</p>
+
+                                @{
+                                    var unsupported = review.MissedKeywords
+                                        .Where(k => string.Equals(k.Status, "unsupported", StringComparison.OrdinalIgnoreCase))
+                                        .ToList();
+                                }
+
+                                @if (unsupported.Count > 0)
+                                {
+                                    <p>
+                                        The posting asks for these, and nothing in your profile supports them:
+                                        <strong>@string.Join(", ", unsupported.Select(k => k.Keyword))</strong>.
+                                    </p>
+                                    <p class="note">
+                                        These were left out on purpose. Adding a skill you cannot evidence is
+                                        the fastest way to lose an offer at reference stage — if you do have
+                                        the experience, add it to your profile and generate again.
+                                    </p>
+                                }
+
+                                @if (review.OverflowRisk)
+                                {
+                                    <p class="note">This may run past the template's page budget. Trimming the weakest bullets usually fixes it.</p>
+                                }
+                            </div>
+                        }
+                    }
+                    else if (_job.Status is JobStatus.Failed or JobStatus.Cancelled)
+                    {
+                        <p class="error">@(_job.Error ?? "Generation did not finish.")</p>
+                        @if (_job.FailureCause == FailureCause.FactValidationFailed)
+                        {
+                            <p class="note">
+                                Some generated content could not be traced back to your profile, so it was
+                                rejected rather than printed. Adding more detail to your profile usually fixes this.
+                            </p>
+                        }
+                    }
+                    else
+                    {
+                        <button type="button" class="link" @onclick="CancelAsync">Cancel</button>
+                    }
+                </div>
+            }
+
+            @if (_error is not null)
+            {
+                <p class="error" role="alert">@_error</p>
+            }
+        </section>
+    }
+
+</RequireAuth>
+
+@code {
+    private List<TemplateDto> _templates = [];
+    private QuotaDto? _quota;
+    private string? _templateId;
+    private string _postingText = string.Empty;
+    private JobDto? _job;
+    private string? _error;
+    private bool _running;
+    private CancellationTokenSource? _poll;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // /api/templates is public, so this page used to load its catalogue and then sit on
+        // "Loading templates…" forever once anything past it needed a token.
+        if (!Tokens.IsAuthenticated) return;
+
+        try
+        {
+            _templates = [.. await Api.GetTemplatesAsync()];
+            // Default to the ATS-safe layout rather than the prettiest one:
+            // most applications are read by a parser first.
+            _templateId = _templates.FirstOrDefault(t => t.AtsRating == "excellent")?.Id
+                          ?? _templates.FirstOrDefault()?.Id;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Could not load the template catalogue.";
+        }
+
+        // Advisory only — the gate is enforced server-side. Showing the number
+        // beforehand is the difference between "start, wait, get refused" and
+        // an honest choice.
+        try { _quota = await Api.Http.GetFromJsonAsync<QuotaDto>("/api/me/quota"); }
+        catch (HttpRequestException) { /* the count is a nicety, not a blocker */ }
+    }
+
+    private static string StageLabel(string stage) => stage switch
+    {
+        "queued"      => "Queued",
+        "composing"   => "Reading your profile",
+        "tailoring"   => "Tailoring to the posting",
+        "typesetting" => "Typesetting the PDF",
+        "done"        => "Finished",
+        "failed"      => "Failed",
+        "cancelled"   => "Cancelled",
+        _             => stage
+    };
+
+    private async Task StartAsync()
+    {
+        _error = null;
+        _running = true;
+        _job = null;
+
+        try
+        {
+            var profile = (await Api.GetProfilesAsync()).FirstOrDefault();
+            if (profile is null)
+            {
+                _error = "Add your profile first — there is nothing to build a CV from yet.";
+                _running = false;
+                return;
+            }
+
+            _job = await Api.CreateDocumentAsync(new CreateDocumentRequest(
+                profile.Id,
+                _templateId!,
+                DocumentKind.Cv,
+                string.IsNullOrWhiteSpace(_postingText) ? null : _postingText));
+
+            if (_job is null)
+            {
+                _error = "The server did not start the job.";
+                _running = false;
+                return;
+            }
+
+            _poll = new CancellationTokenSource();
+            await Api.PollUntilDoneAsync(_job.Id, job =>
+            {
+                _job = job;
+                StateHasChanged();
+            }, _poll.Token);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (QuotaExhaustedException)
+        {
+            _error = "You have used this month's tailored generations. " +
+                     "You can still generate a CV without a posting.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled by the user; the job row already reflects it.
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Could not reach the server.";
+        }
+
+        _running = false;
+    }
+
+    private async Task CancelAsync()
+    {
+        if (_job is null) return;
+        await _poll!.CancelAsync();
+        await Api.CancelJobAsync(_job.Id);
+        _job = _job with { Status = JobStatus.Cancelled, Stage = "cancelled" };
+    }
+
+    private async Task DownloadAsync(Guid jobId)
+    {
+        var pdf = await Api.DownloadPdfAsync(jobId);
+        if (pdf is null)
+        {
+            _error = "The PDF is no longer available.";
+            return;
+        }
+
+        await Js.InvokeVoidAsync("cvMakerDownload", $"cv-{jobId}.pdf", Convert.ToBase64String(pdf));
+    }
+
+    public void Dispose() => _poll?.Dispose();
+}

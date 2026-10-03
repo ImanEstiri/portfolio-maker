@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what happened, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The smallest sequence that shows it. A curl command, a profile that triggers it,
+        or the template and input that produce a bad PDF.
+      placeholder: |
+        1. docker compose up --build
+        2. curl -H 'X-CvMaker-Dev-User: me' ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Web client (Blazor)
+        - API
+        - Renderer / PDF output
+        - Agent plane (tailoring)
+        - Local docker compose stack
+        - Deployment / CI
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Relevant output from `docker compose logs`. Please redact tokens and anything
+        personal — a job posting or a profile fact often is.
+      render: shell

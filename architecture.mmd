@@ -1,0 +1,77 @@
+%% cv-maker architecture — client, services, agent plane, deployment
+flowchart TB
+    subgraph Client["Client — no LaTeX ever leaves the server"]
+        direction LR
+        WEB["Blazor WASM + nginx<br/><i>profile editor · paste posting<br/>template gallery · PDF download</i>"]
+    end
+
+    subgraph Auth["Identity — konradcinkusz/authservice, one instance per product"]
+        direction TB
+        AS["Accounts · tokens · consent<br/><i>holds the only signing key<br/>publishes the public half (JWKS)</i>"]
+    end
+
+    subgraph Api["CvMaker.Api — ASP.NET minimal APIs"]
+        direction TB
+        EP["Endpoints<br/><i>profiles · templates · documents<br/>jobs · me (quota, data, erasure)</i>"]
+        Q["Channel&lt;Guid&gt; queue<br/><i>+ stale-job recovery</i>"]
+        W["GenerationWorker<br/><i>BackgroundService</i>"]
+        EP --> Q --> W
+    end
+
+    subgraph Agentic["CvMaker.Agentic — Azure AI Foundry, or a mock runtime offline"]
+        direction TB
+        FE["FlowEngine<br/><i>cv-generation-flow.json</i>"]
+        A2["posting-analyst"]
+        A3["cv-composer"]
+        A4["ats-critic"]
+        AX["profile-extractor · cover-letter-writer<br/><i>defined, not reachable from any route yet</i>"]
+        FE --> A2 --> A3 --> A4
+        A4 -. "revise ≤1 pass" .-> A3
+    end
+
+    subgraph Core["CvMaker.Core — no I/O, fully unit-tested"]
+        BIND["Template binder (Scriban)<br/><i>JSON → .tex</i>"]
+        ESC["LaTeX escaper<br/><i>metacharacter map · slot caps</i>"]
+        ESC --> BIND
+    end
+
+    subgraph Render["CvMaker.Render — sandboxed"]
+        TEX["TeX Live + latexmk/LuaLaTeX<br/><i>no shell-escape · no reads outside the work dir<br/>non-root · 30 s timeout · no public IP</i>"]
+    end
+
+    subgraph Store["State"]
+        direction LR
+        PG[("Postgres — one server, two databases<br/><i>cvmaker: profiles · facts · postings<br/>documents · jobs · quota<br/>authservice: accounts</i>")]
+        BLOB[("Blob storage<br/><i>generated PDFs</i>")]
+    end
+
+    subgraph Fly["Fly.io — region fra"]
+        FLY["One app per service<br/><i>auto-stop · tag-triggered deploy</i>"]
+    end
+
+    WEB -- "sign-in / refresh<br/><i>/api/v1/auth</i>" --> AS
+    WEB -- "POST /api/documents → 202 + jobId<br/><i>bearer token</i>" --> EP
+    WEB -- "poll GET /api/jobs/{id}<br/>GET /api/jobs/{id}/pdf" --> EP
+    EP -. "verify JWT against<br/>the published keys" .-> AS
+    EP -- "0. consume quota (atomic)<br/><i>before any token spend</i>" --> PG
+    W -- "1. structured JSON only" --> FE
+    W -- "2. bind + escape" --> BIND
+    W -- "3. compile" --> TEX
+    TEX -- "4. PDF" --> W
+    W -- "5. store PDF" --> BLOB
+    W --> PG
+    AS --> PG
+    Api --- FLY
+    Agentic --- FLY
+    Render --- FLY
+    Auth --- FLY
+
+    classDef client fill:#F1EFE8,stroke:#5F5E5A,stroke-width:1px,color:#2C2C2A
+    classDef core fill:#EEEDFE,stroke:#3C3489,stroke-width:1px,color:#26215C
+    classDef agent fill:#FAEEDA,stroke:#854F0B,stroke-width:1px,color:#412402
+    classDef risk fill:#FAECE7,stroke:#993C1D,stroke-width:1px,color:#4A1B0C
+
+    class WEB,FLY,AS client
+    class EP,Q,W,BIND,ESC,PG,BLOB core
+    class FE,A2,A3,A4,AX agent
+    class TEX risk

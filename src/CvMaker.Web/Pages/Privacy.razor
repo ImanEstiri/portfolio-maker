@@ -1,0 +1,124 @@
+@page "/privacy"
+@inject ConsentVersions Consent
+
+<PageTitle>Privacy Policy</PageTitle>
+<h1>Privacy Policy</h1>
+
+<p class="muted">Version @_versions.Privacy</p>
+
+<p class="lede">
+    This service turns facts you type in into a typeset CV. That means it holds personal data
+    about you, and sends some of it to a third party to do the tailoring. This page says
+    exactly what, where, and for how long.
+</p>
+
+<h2>What is collected</h2>
+<ul>
+    <li>
+        <strong>Your account</strong> — email address and password. These are held by the
+        identity service, not by this application. See <em>Two services</em> below.
+    </li>
+    <li>
+        <strong>Profile facts</strong> — everything you enter on the Profile page: name,
+        contact details, employment history, education, skills, languages.
+    </li>
+    <li>
+        <strong>Job postings you paste</strong> — kept verbatim, exactly as pasted.
+    </li>
+    <li>
+        <strong>Generated documents</strong> — the resulting PDF, and a record of each
+        generation (its status, and for a tailored document the keyword review).
+    </li>
+</ul>
+
+<h2>Where it goes</h2>
+<table>
+    <thead>
+        <tr><th>Data</th><th>Processor</th><th>Why</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Profile facts, pasted postings</td>
+            <td>Azure OpenAI / Azure AI Foundry</td>
+            <td>Tailoring a CV to a posting. Only sent when you generate a tailored document</td>
+        </tr>
+        <tr>
+            <td>Generated PDFs</td>
+            <td>Azure Blob Storage</td>
+            <td>So a document you generated is there when you come back for it</td>
+        </tr>
+        <tr>
+            <td>Everything else</td>
+            <td>Fly.io (Frankfurt)</td>
+            <td>Hosting the application and its database</td>
+        </tr>
+    </tbody>
+</table>
+
+<p>
+    Nothing is sold, and nothing is used to train a model on your behalf.
+</p>
+
+<h2>How long it is kept</h2>
+<ul>
+    <li>
+        <strong>Pasted job postings: 30 days.</strong> A background job deletes them once that
+        window passes, whether or not you ask. They are the most sensitive thing here and the
+        least useful to keep.
+    </li>
+    <li>
+        <strong>Everything else: until you delete it.</strong> Profile facts, documents and
+        PDFs stay until you remove them or erase everything.
+    </li>
+</ul>
+
+<h2>Postings mention other people</h2>
+<p>
+    A job advert routinely names a recruiter or a hiring manager. Pasting one puts that
+    person's details into this service, and they never agreed to it. The 30-day limit above is
+    what bounds that, and it is why the limit is not adjustable. Please do not paste anything
+    beyond the advert itself.
+</p>
+
+<h2>Your rights, and the buttons that implement them</h2>
+<p>
+    <a href="account">Your data</a> shows everything held about you and lets you erase it. That
+    page is the access and erasure right, not a summary of it — the same endpoints do both
+    jobs:
+</p>
+<ul>
+    <li><strong>Access</strong> — <code>GET /api/me/data</code>, behind the "Your data" page.</li>
+    <li><strong>Erasure</strong> — <code>DELETE /api/me/data</code>, behind the delete button there.</li>
+</ul>
+<p>
+    Deletion is immediate and not recoverable. It removes profiles, postings, documents and
+    stored PDFs.
+</p>
+
+<h2>Two services</h2>
+<p>
+    Accounts live in a separate identity service from the CV data. That split has one
+    consequence worth stating plainly: <strong>erasing your data here does not delete your
+    account.</strong> The account, its email address and its sign-in history belong to the
+    identity service, and this app has no way to close it yet. To have it closed, write to
+    the contact address below.
+</p>
+
+<h2>Consent</h2>
+<p>
+    Accepting this policy is recorded against its version at the moment you accept it. If a
+    version changes in a way that matters, you will be asked again rather than silently
+    migrated.
+</p>
+
+<h2>Contact</h2>
+<p>
+    Questions, or a request this page does not cover:
+    <a href="mailto:konradcinkusz@gmail.com">konradcinkusz@gmail.com</a>.
+</p>
+
+@code {
+    private ConsentVersions.Versions _versions = new("…", "…", "…");
+
+    protected override async Task OnInitializedAsync() => _versions = await Consent.GetAsync();
+}

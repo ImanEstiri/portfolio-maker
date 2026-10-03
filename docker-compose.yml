@@ -1,0 +1,154 @@
+# Local stack: Postgres + Azurite + renderer + API + web.
+#
+#   docker compose up --build
+#   curl http://localhost:5100/api/templates
+#
+# Auth is external (konradcinkusz/authservice) and not part of this compose
+# file. Without it, the API runs in Development and takes the caller from the
+# X-CvMaker-Dev-User header, and the web client sends that header because
+# DEV_USER is set below — so the UI at http://localhost:8081 works signed in
+# as a development user. CONTRIBUTING.md covers running against a real
+# authservice instead.
+
+services:
+  db:
+    # Built rather than pulled so the init scripts run here too — the whole point of
+    # docker/postgres/Dockerfile is that dev and Fly get the same two databases from the
+    # same source. Using the bare image locally is how they drift.
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    environment:
+      POSTGRES_USER: cvmaker
+      POSTGRES_PASSWORD: cvmaker
+      POSTGRES_DB: cvmaker
+    ports: ["5432:5432"]
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cvmaker"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  render:
+    build:
+      context: .
+      dockerfile: src/CvMaker.Render/Dockerfile
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,nosuid,size=512m
+    # No published port: only the API talks to the renderer. Keeping it off the
+    # host is the cheapest version of "the compile plane is not reachable".
+    expose: ["8080"]
+    healthcheck:
+      # /ready compiles a real document, so an image missing TeX packages is
+      # unhealthy rather than quietly failing on the first user request.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/ready || exit 1"]
+      interval: 10s
+      timeout: 30s
+      retries: 10
+      start_period: 30s
+
+  azurite:
+    # Local stand-in for Azure Blob Storage — the sole target of
+    # generated-cvs PDFs (Services/Storage/AzureBlobArtifactStorageService).
+    # No Azure account needed locally, same philosophy as the agentic mock
+    # runtime below.
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000"
+    expose: ["10000"]
+
+  agentic:
+    build:
+      context: .
+      dockerfile: src/CvMaker.Agentic/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # No AzureAIFoundry__Endpoint here on purpose: locally the service runs on
+      # the deterministic mock runtime, so the whole pipeline works with no
+      # Azure account and no token spend. GET /api/runtime reports which is live.
+      Agents__Root: "/app/agents"
+      Flows__Root: "/app/flows"
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  api:
+    build:
+      context: .
+      dockerfile: src/CvMaker.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: "Host=db;Database=cvmaker;Username=cvmaker;Password=cvmaker"
+      Render__BaseUrl: "http://render:8080"
+      Agentic__BaseUrl: "http://agentic:8080"
+      Templates__Root: "/app/templates"
+      # No Auth__Authority and no Jwt__SecretKey on purpose. This is the
+      # dev-user mode the README documents — UserContext falls back to the
+      # X-CvMaker-Dev-User header — and configuring a secret here is exactly
+      # what stopped that mode from ever being exercised.
+      #
+      # To run against a real authservice instead, see CONTRIBUTING.md.
+      Jwt__Issuer: "CvMaker"
+      Jwt__Audience: "CvMaker"
+      # The web container's origin. Development would fall back to this list
+      # anyway; naming it explicitly means the deployed configuration shape is
+      # the one CI exercises.
+      Cors__AllowedOrigins__0: "http://localhost:8081"
+      # Framework logging at Information means every request emits four lines and every EF
+      # query emits three. That is ~5000 lines per CI run, and it buried the one thing worth
+      # reading. Everything framework-side drops to Warning; this application's own loggers
+      # stay at Information, so the worker still narrates what it did to each job.
+      Logging__LogLevel__Default: "Warning"
+      Logging__LogLevel__CvMaker: "Information"
+      # Azurite's well-known development account — public, not a secret
+      # (https://learn.microsoft.com/azure/storage/common/storage-use-azurite).
+      # Production/staging set ArtifactsStorage__StorageAccountUrl instead
+      # (flyio/api.fly.toml) and this is left unset.
+      ArtifactsStorage__ConnectionString: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      # Azurite only understands REST versions up to the one it shipped with, and the SDK
+      # asks for the newest it knows — 2025-07-05 in Azure.Storage.Blobs 12.25.0, which
+      # Azurite 3.34.0 rejects with 400 InvalidHeaderValue. That killed container creation at
+      # startup, so every generation failed with StorageFailure. Deployed environments leave
+      # this unset: real Azure understands whatever the SDK asks for.
+      ArtifactsStorage__ServiceVersion: "V2021_12_02"
+    ports: ["5100:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    depends_on:
+      db: { condition: service_healthy }
+      render: { condition: service_healthy }
+      agentic: { condition: service_healthy }
+      azurite: { condition: service_started }
+
+  web:
+    build:
+      context: .
+      dockerfile: src/CvMaker.Web/Dockerfile
+    environment:
+      API_BASE_URL: "http://localhost:5100"
+      # Signs the UI in as this user with no identity service: the client sends
+      # X-CvMaker-Dev-User instead of a token, and only an API in Development
+      # with no token validation configured accepts it. "dev-user" is also who
+      # the API assumes when a request has no header at all, so the UI and a
+      # bare curl see the same data.
+      #
+      # For real sign-in, remove this and set AUTH_BASE_URL — CONTRIBUTING.md.
+      DEV_USER: "dev-user"
+    ports: ["8081:8080"]
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:

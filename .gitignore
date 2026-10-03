@@ -1,0 +1,55 @@
+# ── .NET ────────────────────────────────────────────────────────────────────
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+*.userprefs
+project.lock.json
+project.fragment.lock.json
+
+# ── IDE ─────────────────────────────────────────────────────────────────────
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+
+# ── Local secrets ───────────────────────────────────────────────────────────
+# Never committed. See CONTRIBUTING.md — local configuration comes from a
+# gitignored .env or dotnet user-secrets, never from a file in the tree.
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+*.pem
+*.pfx
+*.key
+
+# ── TeX intermediates ───────────────────────────────────────────────────────
+# The renderer writes these under a tmpfs in the container, but a local
+# reproduction of a template problem leaves them in the working tree.
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+*.xdv
+
+# ── Generated output ────────────────────────────────────────────────────────
+*.pdf
+!docs/**/*.pdf
+
+# ── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

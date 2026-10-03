@@ -1,0 +1,78 @@
+@page "/terms"
+@inject ConsentVersions Consent
+
+<PageTitle>Terms of Use</PageTitle>
+<h1>Terms of Use</h1>
+
+<p class="muted">Version @_versions.Terms</p>
+
+<h2>What this is</h2>
+<p>
+    cv-maker builds a typeset CV from facts you enter, optionally tailored to a job posting you
+    paste. It is offered as-is, with no guarantee of availability, and it is not a
+    career-advice service.
+</p>
+
+<h2>What it will not do</h2>
+<p>
+    Generated content is checked against your profile before it becomes a document: anything
+    that cannot be traced back to a fact you entered is rejected rather than printed. That check
+    is the point of the product, and it is also its limit — it proves a claim came from you, not
+    that the claim is true. <strong>Read what you send.</strong> You are responsible for the
+    accuracy of your own CV.
+</p>
+
+<h2>Your account</h2>
+<ul>
+    <li>You need a working email address, and you are responsible for what happens under your account.</li>
+    <li>One person per account. Do not share credentials.</li>
+    <li>You can delete your data at any time from <a href="account">Your data</a>.</li>
+</ul>
+
+<h2>Fair use</h2>
+<p>
+    Generation costs real money per document. Please do not automate bulk generation, resell
+    access, or use the service to produce documents for other people at scale. Accounts doing
+    that may be limited or closed.
+</p>
+
+<h2>Pasted content</h2>
+<p>
+    Only paste job adverts you are applying to. Do not paste anything confidential, and do not
+    paste other people's personal data beyond what the advert itself contains. Pasted postings
+    are deleted after 30 days — see the <a href="privacy">Privacy Policy</a>.
+</p>
+
+<h2>Your content is yours</h2>
+<p>
+    You keep every right in the facts you enter and the CVs you generate. Storing and processing
+    them to run the service is the only permission this grants, and it ends when you delete
+    them.
+</p>
+
+<h2>The templates</h2>
+<p>
+    The CV templates carry their own licences. The <em>altacv-modern</em> template embeds
+    <code>altacv.cls</code> by LianTze Lim, distributed under the LaTeX Project Public Licence.
+    Generating a document with it is ordinary use; redistributing the template is governed by
+    that licence.
+</p>
+
+<h2>Liability</h2>
+<p>
+    The service is provided without warranty. It is not liable for a job you did not get, a
+    document that failed to generate, or data lost to an outage. Keep your own copy of anything
+    that matters.
+</p>
+
+<h2>Changes</h2>
+<p>
+    These terms are versioned. A change that affects you means being asked to accept the new
+    version rather than being moved onto it quietly.
+</p>
+
+@code {
+    private ConsentVersions.Versions _versions = new("…", "…", "…");
+
+    protected override async Task OnInitializedAsync() => _versions = await Consent.GetAsync();
+}

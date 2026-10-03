@@ -1,0 +1,85 @@
+%% ats-plain — single-column CV built for machine parsing first.
+%%
+%% Every choice here is made against applicant tracking systems rather than
+%% against the eye: one column so text extracts in reading order, no glyph
+%% icons (FontAwesome contact icons extract as junk or vanish), no tabular
+%% layout, standard section names, and selectable text throughout.
+%%
+%% Bound by CvMaker.Core.Binding.TemplateBinder. Every value below is ALREADY
+%% LaTeX-escaped — do not add \detokenize, \verb or any other escaping here,
+%% and never introduce a slot that is not on the escaped view model.
+%%
+%% Compiles under both lualatex and pdflatex: only base packages are used, so
+%% this template survives a TeX Live scheme change without a rebuild.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2cm]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
+
+%% Flat, unnumbered sections with a rule — the closest thing to a heading an
+%% extractor can recognise without relying on font size alone.
+\titleformat{\section}
+  {\large\bfseries}{}{0pt}{}[\vspace{-6pt}\rule{\linewidth}{0.4pt}]
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+
+\setlist[itemize]{leftmargin=1.2em, itemsep=2pt, topsep=2pt, parsep=0pt}
+
+\pagestyle{empty}
+
+\begin{document}
+
+%% ── Header ────────────────────────────────────────────────────────────────
+\begin{center}
+  {\LARGE\bfseries {{ cv.full_name }}}
+
+  {{ if cv.headline != "" }}
+  \vspace{2pt}
+  {{ cv.headline }}
+  {{ end }}
+
+  \vspace{4pt}
+  {\small
+  {{ if cv.email != "" }}{{ cv.email }}{{ end }}
+  {{ if cv.phone != "" }}~$\cdot$~{{ cv.phone }}{{ end }}
+  {{ if cv.location != "" }}~$\cdot$~{{ cv.location }}{{ end }}
+  {{ for link in cv.links }}
+  ~$\cdot$~{{ if link.is_link }}\href{ {{- link.url -}} }{ {{- link.label -}} }{{ else }}{{ link.label }}{{ end }}
+  {{ end }}
+  }
+\end{center}
+
+%% ── Summary ───────────────────────────────────────────────────────────────
+{{ if cv.summary != "" }}
+\section*{Summary}
+{{ cv.summary }}
+{{ end }}
+
+%% ── Body ──────────────────────────────────────────────────────────────────
+{{ for section in cv.sections }}
+\section*{ {{- section.title -}} }
+
+{{ for entry in section.entries }}
+\noindent\textbf{ {{- entry.heading -}} }%
+{{ if entry.organization != "" }} --- {{ entry.organization }}{{ end }}%
+{{ if entry.location != "" }}, {{ entry.location }}{{ end }}%
+{{ if entry.date_range != "" }}\hfill {{ entry.date_range }}{{ end }}
+
+{{ if entry.bullets.size > 0 }}
+\begin{itemize}
+{{ for bullet in entry.bullets }}
+  \item {{ bullet }}
+{{ end }}
+\end{itemize}
+{{ end }}
+
+\vspace{4pt}
+{{ end }}
+{{ end }}
+
+\end{document}

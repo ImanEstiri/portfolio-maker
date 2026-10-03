@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <!--
+    Blazor WebAssembly behind nginx, matching BlackHoleSim.Web. Keeps the stack
+    .NET end to end. The cost is that a WebAssembly app serves crawlers an empty
+    shell, so anything that has to be indexed belongs on a separate static page.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>CvMaker.Web</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.11" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="9.0.11" />
+    <!-- AddHttpClient. Present in the ASP.NET shared framework, but a WASM
+         client is not an ASP.NET app and has to reference it explicitly. -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CvMaker.Shared\CvMaker.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

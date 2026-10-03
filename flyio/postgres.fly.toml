@@ -1,0 +1,72 @@
+# cv-maker Postgres (DEV).
+#
+# A single plain Postgres instance — not Fly's managed HA Postgres cluster —
+# holding two logical databases (docker/postgres/Dockerfile, the same image
+# and init script as docker-compose.yml's `db` service): `cvmaker` for
+# CvMaker.Api and `authservice` for this product's authservice instance
+# (flyio/authservice.fly.toml). docs/decisions/0002 records why they share a
+# machine and what that costs.
+#
+# No [http_service] and no public IP, same posture as the renderer and agent
+# plane: reachable only over Fly's private 6PN network — that is, from apps in
+# the same Fly organisation — never from the internet.
+#
+# min_machines_running = 1 and no auto-stop: unlike a stateless service, a
+# scaled-to-zero database means every dependent request pays a cold start, and
+# there is no work to "drop" by staying up — it is cheaper to just keep it
+# running.
+#
+# One-time setup before the first deploy:
+#   flyctl volumes create cvmaker_postgres_data --region fra --size 10 -a cvmaker-postgres-dev
+#
+# Secrets (flyctl secrets set -a cvmaker-postgres-dev):
+#   POSTGRES_PASSWORD
+#   AUTHSERVICE_DB_PASSWORD  — the `authservice` role's own password. Unset, the
+#                              init script reuses POSTGRES_PASSWORD, which is a
+#                              quick-start convenience rather than something a
+#                              deployment should keep (docs/decisions/0002).
+# Both take effect only on first boot against an empty volume, when
+# docker/initdb/ creates the databases.
+#
+# Then point each service at its own database:
+#   CvMaker.Api   ConnectionStrings__Default=Host=cvmaker-postgres-dev.flycast;Port=5432;Database=cvmaker;Username=cvmaker;Password=<POSTGRES_PASSWORD>
+#   authservice   ConnectionStrings__DefaultConnection — see flyio/authservice.fly.toml
+#
+# `cvmaker` is POSTGRES_USER, i.e. the server's superuser, so the API's login can
+# read the `authservice` database as well. Separate roles keep the two services'
+# credentials apart; they do not isolate the data from the API. A dedicated
+# non-superuser role for the API is the follow-up if that isolation is wanted.
+
+app = "cvmaker-postgres-dev"
+primary_region = "fra"
+
+[build]
+  dockerfile = "../docker/postgres/Dockerfile"
+
+[env]
+  POSTGRES_USER = "cvmaker"
+  POSTGRES_DB = "cvmaker"
+  # lost+found on a freshly mounted Fly volume would otherwise sit inside
+  # PGDATA and make postgres refuse to initialise against a "non-empty"
+  # directory.
+  PGDATA = "/var/lib/postgresql/data/pgdata"
+
+[[mounts]]
+  source = "cvmaker_postgres_data"
+  destination = "/var/lib/postgresql/data"
+
+[[services]]
+  internal_port = 5432
+  protocol = "tcp"
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"

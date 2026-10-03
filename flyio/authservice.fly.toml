@@ -1,0 +1,97 @@
+# The identity service for cv-maker (DEV).
+#
+# This deploys someone else's image. konradcinkusz/authservice publishes a container to GHCR
+# and deliberately never deploys itself — each consuming project runs its own instance, with
+# its own database and its own signing key, so a compromise of one product's identity service
+# is not a compromise of another's. cv-maker is a consuming project, so the app lives here.
+#
+# There is no [build.dockerfile]: the image is pulled, not built from this repository. Pin the
+# tag. authservice is 0.x and says so; tracking `latest` means an unreviewed HTTP contract
+# change arrives with the next unrelated deploy.
+#
+# min_machines_running = 1 is the one setting here that is not negotiable. CvMaker.Api
+# validates every request's token against this app's /.well-known/jwks.json — on its first
+# request and again whenever its key cache expires — so this app sits on the synchronous
+# request path of the whole product. Scaled to zero, a cache expiry somewhere else becomes a
+# failed sign-in rather than a slow one.
+#
+# Secrets (flyctl secrets set -a cvmaker-authservice-dev):
+#   ConnectionStrings__DefaultConnection
+#       Host=cvmaker-postgres-dev.flycast;Port=5432;Database=authservice;Username=authservice;Password=<AUTHSERVICE_DB_PASSWORD>
+#       The `authservice` database and role are created by docker/initdb/ on the Postgres
+#       app's first boot (flyio/postgres.fly.toml).
+#   Jwt__PrivateKeyPem
+#       openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+#       Keep the file. Losing it signs every user out; leaking it lets the holder mint tokens
+#       as anyone, including administrators.
+#   SendGrid__ApiKey   (optional — without it, password reset and email verification do not
+#       send, and authservice keeps email verification off rather than locking users out.)
+#   OAuth__Google__ClientId / ClientSecret, OAuth__GitHub__ClientId / ClientSecret (optional)
+#
+# See https://github.com/konradcinkusz/authservice/blob/main/docs/DEPLOYMENT.md
+
+app = "cvmaker-authservice-dev"
+primary_region = "fra"
+
+[build]
+  image = "ghcr.io/konradcinkusz/authservice:v0.1.0"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+  DATABASE_PROVIDER = "PostgreSQL"
+
+  # `iss` and `aud` are cv-maker's, not authservice's "AuthService" default. Two products both
+  # on the default would each accept the other's tokens; these values are what CvMaker.Api
+  # validates against in flyio/api.fly.toml.
+  Jwt__Issuer = "CvMaker"
+  Jwt__Audience = "CvMaker"
+
+  # Used to build jwks_uri in the discovery document, so consumers are handed a URL they can
+  # actually reach rather than Fly's internal request host.
+  Jwt__PublicBaseUrl = "https://cvmaker-authservice-dev.fly.dev"
+
+  # EnsureCreated builds the schema on an empty database and does nothing afterwards. Correct
+  # for a first deploy; switch to Migrate once authservice ships a committed migration set,
+  # or model changes will silently not be applied.
+  Database__SchemaMode = "EnsureCreated"
+
+  # Browsers hit this directly for sign-in and registration, so the web origin has to be here
+  # as well as on the API.
+  Cors__AllowedOrigins__0 = "https://cvmaker-web-dev.fly.dev"
+
+  # Where authservice sends the browser after an OAuth round trip.
+  OAuth__CallbackBaseUrl = "https://cvmaker-authservice-dev.fly.dev"
+  OAuth__PostLoginRedirectBaseUrl = "https://cvmaker-web-dev.fly.dev"
+  OAuth__PostLoginRedirectAllowedBaseUrls__0 = "https://cvmaker-web-dev.fly.dev"
+  FrontendBaseUrl = "https://cvmaker-web-dev.fly.dev"
+
+  # Fly terminates TLS at the proxy, so the client IP the rate limiter partitions on arrives
+  # in a forwarded header rather than on the connection.
+  Network__TrustAllProxies = "true"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+# /health/ready, not /health: readiness returns 503 until the schema is initialised and the
+# database answers. /health is static and would report success while the service could not
+# actually serve a sign-in.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "60s"
+  method = "GET"
+  path = "/health/ready"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -1,0 +1,29 @@
+# Exclusion-based: the .NET images use the repository root as build context, so
+# without this every image ships the test tree, the infra tree and any local build
+# output as context.
+
+.git
+.github
+.vs
+.vscode
+.idea
+
+**/bin
+**/obj
+artifacts
+
+tests
+docs
+infra
+flyio
+
+*.md
+!README.md
+
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+
+**/.DS_Store

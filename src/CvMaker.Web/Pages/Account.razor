@@ -1,0 +1,111 @@
+@page "/account"
+@inject CvMakerApiClient Api
+@inject TokenStore Tokens
+
+<PageTitle>Your data</PageTitle>
+<h1>Your data</h1>
+
+<RequireAuth Message="Sign in to see what data this service holds about you.">
+
+    @if (_summary is null)
+    {
+        <p>Loading…</p>
+    }
+    else
+    {
+        <p>This service holds:</p>
+        <ul>
+            <li>@_summary.Profiles profile(s)</li>
+            <li>@_summary.JobPostings pasted job posting(s)</li>
+            <li>@_summary.Documents document(s)</li>
+            <li>@_summary.GeneratedPdfs generated PDF(s)</li>
+        </ul>
+
+        @if (_quota is not null)
+        {
+            <h2>This month</h2>
+            <p>
+                @_quota.Used of @_quota.Limit tailored generations used (@_quota.Tier tier).
+                Renews @_quota.RenewsAt.ToLocalTime().ToString("d").
+            </p>
+        }
+
+        <h2>Delete everything</h2>
+        <p>
+            This removes your profile, the postings you pasted, and every CV generated from them.
+            It cannot be undone.
+        </p>
+        <p class="note">
+            Your sign-in account is held by a separate identity service, and this app cannot close
+            it yet. Deleting your data here leaves the account itself in place — the
+            <a href="privacy">Privacy Policy</a> says how to have it closed.
+        </p>
+
+        @if (!_confirming)
+        {
+            <button type="button" @onclick="() => _confirming = true">Delete my data</button>
+        }
+        else
+        {
+            <p><strong>Type DELETE to confirm.</strong></p>
+            <input @bind="_confirmText" @bind:event="oninput" aria-label="Type DELETE to confirm" />
+            <button type="button" disabled="@(_confirmText != "DELETE" || _busy)" @onclick="PurgeAsync">
+                @(_busy ? "Deleting…" : "Delete permanently")
+            </button>
+            <button type="button" class="link" @onclick="() => _confirming = false">Cancel</button>
+        }
+
+        @if (_message is not null)
+        {
+            <p class="ok" role="status">@_message</p>
+        }
+    }
+
+</RequireAuth>
+
+@code {
+    private sealed record DataSummary(int Profiles, int JobPostings, int Documents, int GeneratedPdfs);
+
+    private DataSummary? _summary;
+    private QuotaDto? _quota;
+    private bool _confirming, _busy;
+    private string _confirmText = string.Empty;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The catch in LoadAsync falls back to a zeroed summary, so a signed-out visitor was
+        // told "This service holds: 0 profile(s)" — a false statement about their own data,
+        // and the most misleading of the four pages.
+        if (!Tokens.IsAuthenticated) return;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try { _summary = await Api.Http.GetFromJsonAsync<DataSummary>("/api/me/data"); }
+        catch (HttpRequestException) { _summary = new DataSummary(0, 0, 0, 0); }
+
+        try { _quota = await Api.Http.GetFromJsonAsync<QuotaDto>("/api/me/quota"); }
+        catch (HttpRequestException) { /* advisory */ }
+    }
+
+    private async Task PurgeAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Api.Http.DeleteAsync("/api/me/data");
+            _message = "Your data has been deleted.";
+            _confirming = false;
+            _confirmText = string.Empty;
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _message = "Deletion failed. Nothing was removed — please try again.";
+        }
+        _busy = false;
+    }
+}

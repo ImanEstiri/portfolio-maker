@@ -1,0 +1,64 @@
+@inherits LayoutComponentBase
+@inject TokenStore Tokens
+@inject DevUser DevUser
+@inject AuthClient Auth
+@inject NavigationManager Nav
+@implements IDisposable
+
+<header>
+    <nav>
+        <a class="brand" href="">cv-maker</a>
+        <div class="links">
+            <NavLink href="profile">Profile</NavLink>
+            <NavLink href="generate">Generate</NavLink>
+            <NavLink href="jobs">Documents</NavLink>
+            <NavLink href="account">Your data</NavLink>
+        </div>
+        <div class="account">
+            @if (DevUser.IsEnabled)
+            {
+                @* Not a session anyone can leave: the identity comes from configuration. Saying so
+                   in the chrome keeps a development build from passing for a signed-in one. *@
+                <span class="dev-user" title="Sign-in is off. Every request is made as this user, which only an API in Development with no token validation configured accepts.">
+                    Dev mode · @DevUser.Name
+                </span>
+            }
+            else if (Tokens.IsAuthenticated)
+            {
+                <button class="link" @onclick="LogoutAsync">Sign out</button>
+            }
+            else
+            {
+                <NavLink href="login">Sign in</NavLink>
+                <NavLink href="register" class="button">Create account</NavLink>
+            }
+        </div>
+    </nav>
+</header>
+
+<main>
+    @Body
+</main>
+
+<footer>
+    <small>Your CV is built from facts you entered. Every line has to cite one of them, and content that doesn't is rejected — but read it before you send it.</small>
+    <nav class="legal">
+        <a href="privacy">Privacy</a> ·
+        <a href="terms">Terms</a>
+    </nav>
+</footer>
+
+@code {
+    protected override void OnInitialized() => Tokens.Changed += StateHasChanged;
+
+    public void Dispose() => Tokens.Changed -= StateHasChanged;
+
+    private async Task LogoutAsync()
+    {
+        // Awaited now: signing out revokes the refresh token at authservice and clears it from
+        // sessionStorage. Forgetting a token locally leaves a live credential behind if it
+        // ever leaked, so the server call is the part that matters.
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("login");
+    }
+}

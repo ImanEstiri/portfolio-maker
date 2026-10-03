@@ -1,0 +1,33 @@
+# Normalise line endings on the way in and check out LF everywhere.
+#
+# This is not cosmetic here. docker-entrypoint.sh and the Postgres init script run inside
+# Linux containers, and a CRLF in a shebang line fails there with "no such file or
+# directory" — the interpreter it names is "sh\r", which does not exist. A contributor on
+# Windows with core.autocrlf would otherwise produce exactly that on their first build.
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.cs      text eol=lf
+*.razor   text eol=lf
+*.cls     text eol=lf
+*.scriban text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.toml    text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.pdf   binary
+*.woff2 binary
+
+# EF Core generates these. Collapsing them keeps a model change reviewable instead of
+# burying the one-line edit under a snapshot diff. Still diffable with `git diff --text`.
+src/CvMaker.Api/Data/Migrations/** linguist-generated=true
+
+# Third-party, unmodified (see THIRD_PARTY_NOTICES.md). Without this, GitHub reports TeX as
+# one of the project's languages on the strength of a file nobody here wrote.
+templates/altacv-modern/assets/altacv.cls linguist-vendored=true
+
+docs/** linguist-documentation=true

@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/konradcinkusz/portfolio-maker/security/policy
+    about: >
+      Please do not open a public issue for anything exploitable. SECURITY.md has the
+      private reporting route.

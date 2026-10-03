@@ -1,0 +1,395 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+# Nothing here writes to the repository, so the token is read-only. Pull requests from forks
+# get this anyway; setting it makes pushes to branches match what a contributor's PR will see.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test (.NET)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore CvMaker.sln
+
+      - name: Build
+        run: dotnet build CvMaker.sln -c Release --no-restore
+
+      # The injection corpus lives in these tests. A failure here means
+      # untrusted text can reach the TeX engine as a command — treat it as a
+      # security regression, not a flaky test.
+      - name: Test
+        run: dotnet test CvMaker.sln -c Release --no-build --logger "trx;LogFileName=results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: "**/*.trx"
+
+      # A model change with no matching migration is not a latent problem: EF Core 9 refuses
+      # to migrate at all, so CvMaker.Api cannot start against a fresh database — every first
+      # deploy, and every run of the end-to-end job below. That is exactly how the Pdf ->
+      # PdfBlobPath drift survived, hidden behind an earlier failure in the render build.
+      - name: Migrations match the model
+        run: |
+          dotnet tool install --global dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          dotnet ef migrations has-pending-model-changes \
+            --project src/CvMaker.Api \
+            --context AppDbContext \
+            || {
+              echo "::error::The model has changed without a migration. Run: dotnet ef migrations add <Name> --project src/CvMaker.Api"
+              exit 1
+            }
+
+  render-sandbox:
+    # Builds every image as a compile check, then starts only the renderer — it is the one
+    # with a security posture to prove. The name says both halves because the previous one
+    # ("Render image & sandbox proof") hid the fact that three other images build here.
+    name: Images build; renderer sandbox holds
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build render image
+        run: docker build -f src/CvMaker.Render/Dockerfile -t cvmaker-render:ci .
+
+      - name: Build agentic image
+        run: docker build -f src/CvMaker.Agentic/Dockerfile -t cvmaker-agentic:ci .
+
+      - name: Build web image
+        run: docker build -f src/CvMaker.Web/Dockerfile -t cvmaker-web:ci .
+
+      # Started with the same hardening docker-compose.yml applies, so this job proves
+      # the service actually works under it rather than only in a plain run. Fly does
+      # not apply these flags (flyio/render.fly.toml; SECURITY.md says what holds there).
+      - name: Start renderer (hardened)
+        run: |
+          docker run -d --name render \
+            -p 8080:8080 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,size=512m \
+            cvmaker-render:ci
+
+      - name: Wait for TeX to be usable
+        run: |
+          # /ready compiles a real document, so this also proves the image has a
+          # working TeX installation — the failure mode a trimmed scheme causes.
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/ready; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "renderer never became ready"
+          docker logs render
+          exit 1
+
+      - name: Compiles a normal document
+        run: |
+          cat > /tmp/ok.json <<'JSON'
+          {"texSource":"\\documentclass{article}\\begin{document}Alex Example\\end{document}","engine":"lualatex"}
+          JSON
+          curl -fsS -X POST http://localhost:8080/render \
+            -H 'Content-Type: application/json' -d @/tmp/ok.json -o /tmp/out.pdf
+          head -c 4 /tmp/out.pdf | grep -q '%PDF' || { echo "not a PDF"; exit 1; }
+          echo "PDF produced: $(wc -c < /tmp/out.pdf) bytes"
+
+      # ── Sandbox proofs ────────────────────────────────────────────────────
+      # These bypass the escaper on purpose. The unit tests prove hostile text
+      # never reaches the engine; these prove that if it somehow did, the
+      # second layer still holds. Both layers are load-bearing.
+
+      - name: Refuses to read files outside the work directory
+        run: |
+          cat > /tmp/read.json <<'JSON'
+          {"texSource":"\\documentclass{article}\\begin{document}\\input{/etc/passwd}\\end{document}","engine":"lualatex"}
+          JSON
+          code=$(curl -s -o /tmp/read.out -w '%{http_code}' -X POST http://localhost:8080/render \
+            -H 'Content-Type: application/json' -d @/tmp/read.json)
+          if [ "$code" = "200" ] && grep -qa 'root:x:' /tmp/read.out; then
+            echo "FAIL: /etc/passwd contents leaked into the PDF"
+            exit 1
+          fi
+          echo "file read blocked (HTTP $code)"
+
+      - name: Refuses to execute shell commands
+        run: |
+          cat > /tmp/shell.json <<'JSON'
+          {"texSource":"\\documentclass{article}\\begin{document}\\immediate\\write18{touch /tmp/pwned}\\end{document}","engine":"lualatex"}
+          JSON
+          curl -s -o /dev/null -X POST http://localhost:8080/render \
+            -H 'Content-Type: application/json' -d @/tmp/shell.json
+          if docker exec render test -e /tmp/pwned; then
+            echo "FAIL: shell escape executed"
+            exit 1
+          fi
+          echo "shell escape blocked"
+
+      - name: Kills a runaway compile at the timeout
+        run: |
+          cat > /tmp/bomb.json <<'JSON'
+          {"texSource":"\\documentclass{article}\\begin{document}\\def\\x{\\x}\\x\\end{document}","engine":"lualatex"}
+          JSON
+          start=$(date +%s)
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X POST http://localhost:8080/render \
+            -H 'Content-Type: application/json' -d @/tmp/bomb.json)
+          elapsed=$(( $(date +%s) - start ))
+          if [ "$code" = "200" ]; then echo "FAIL: expansion bomb produced a PDF"; exit 1; fi
+          if [ "$elapsed" -gt 60 ]; then echo "FAIL: timeout did not fire (${elapsed}s)"; exit 1; fi
+          echo "runaway compile killed after ${elapsed}s (HTTP $code)"
+
+      - name: Still healthy after the hostile inputs
+        run: curl -fsS http://localhost:8080/health
+
+      - name: Renderer logs
+        if: always()
+        run: docker logs render || true
+
+  end-to-end:
+    name: PDF from hand-entered data
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The acceptance test: a profile typed in by hand becomes a real PDF,
+      # through the same queue, worker, binder and renderer the tailored path
+      # uses. No model involved.
+      - name: Start the stack
+        run: docker compose up --build -d --wait --wait-timeout 600
+
+      - name: Templates are catalogued
+        run: |
+          curl -fsS http://localhost:5100/api/templates -o /tmp/templates.json
+          cat /tmp/templates.json
+          for id in ats-plain altacv-modern; do
+            grep -q "\"id\":\"$id\"" /tmp/templates.json || {
+              echo "template $id missing from the catalogue"; exit 1; }
+          done
+
+      # curl has no same-origin policy, so every other step here would pass against an API
+      # that a browser cannot call at all. This is the one assertion that catches that.
+      - name: Preflight is answered for the web origin
+        run: |
+          headers=$(curl -sS -D - -o /dev/null -X OPTIONS http://localhost:5100/api/templates \
+            -H 'Origin: http://localhost:8081' \
+            -H 'Access-Control-Request-Method: GET' \
+            -H 'Access-Control-Request-Headers: authorization')
+
+          echo "$headers"
+
+          echo "$headers" | grep -qi '^access-control-allow-origin: http://localhost:8081' || {
+            echo "::error::No Access-Control-Allow-Origin for the web origin — the deployed client would be blocked"
+            exit 1
+          }
+
+          # The bearer token rides in this header, so a preflight that does not allow it
+          # blocks every authenticated call while leaving the public ones working.
+          echo "$headers" | grep -qi '^access-control-allow-headers:.*authorization' || {
+            echo "::error::Preflight does not allow the Authorization header"
+            exit 1
+          }
+
+      - name: An unknown origin is not allowed
+        run: |
+          headers=$(curl -sS -D - -o /dev/null -X OPTIONS http://localhost:5100/api/templates \
+            -H 'Origin: https://not-our-app.example' \
+            -H 'Access-Control-Request-Method: GET')
+
+          if echo "$headers" | grep -qi '^access-control-allow-origin'; then
+            echo "::error::CORS answered an origin that is not configured"
+            exit 1
+          fi
+          echo "unconfigured origin refused"
+
+      - name: Create a profile
+        run: |
+          cat > /tmp/profile.json <<'JSON'
+          {
+            "fullName": "Alex Example",
+            "headline": "Senior Software Engineer",
+            "email": "alex@example.com",
+            "location": "Springfield",
+            "links": { "GitHub": "https://github.com/example" },
+            "facts": [
+              {"factId":"e1","kind":"Employment","text":"Modernised an ASP.NET backend on SQL Server and Oracle.","organization":"Acme Corp","role":"Full-Stack Engineer","startDate":"Sep 2022","endDate":"Mar 2025"},
+              {"factId":"e2","kind":"Employment","text":"Ran Azure DevOps pipelines for an e-commerce platform.","organization":"Acme Corp","role":"Full-Stack Engineer","startDate":"Sep 2022","endDate":"Mar 2025"},
+              {"factId":"e3","kind":"Employment","text":"Delivered Azure-hosted prototypes and migration plans.","organization":"Globex Consulting","role":"Senior Software Engineer","startDate":"2025"},
+              {"factId":"s1","kind":"Skill","text":"C#, .NET, EF Core"},
+              {"factId":"s2","kind":"Skill","text":"PostgreSQL, SQL Server"},
+              {"factId":"l1","kind":"Language","text":"English (C1)"},
+              {"factId":"d1","kind":"Education","text":"Computer Science","organization":"Example University","role":"MSc","startDate":"2012","endDate":"2017"}
+            ]
+          }
+          JSON
+          curl -fsS -X POST http://localhost:5100/api/profiles \
+            -H 'Content-Type: application/json' \
+            -H 'X-CvMaker-Dev-User: ci-user' \
+            -d @/tmp/profile.json -o /tmp/created.json
+          python3 -c "import json;print(json.load(open('/tmp/created.json'))['id'])" > /tmp/profile-id
+          echo "profile $(cat /tmp/profile-id)"
+
+      # An edit replaces the profile's facts wholesale, and the replacements arrive with
+      # client-assigned ids. EF Core took those for rows that already existed, so the save
+      # failed and every edit of a profile that had facts returned 500 while creating one
+      # worked fine — which is why nothing noticed.
+      - name: Updating a profile keeps its facts
+        run: |
+          python3 - <<'PY'
+          import json
+          p = json.load(open('/tmp/profile.json'))
+          p['headline'] = 'Principal Software Engineer'
+          p['facts'].append({'factId': 's3', 'kind': 'Skill', 'text': 'Docker, GitHub Actions'})
+          json.dump(p, open('/tmp/profile-updated.json', 'w'))
+          PY
+          curl -fsS -X PUT "http://localhost:5100/api/profiles/$(cat /tmp/profile-id)" \
+            -H 'Content-Type: application/json' \
+            -H 'X-CvMaker-Dev-User: ci-user' \
+            -d @/tmp/profile-updated.json -o /dev/null
+          curl -fsS "http://localhost:5100/api/profiles/$(cat /tmp/profile-id)" \
+            -H 'X-CvMaker-Dev-User: ci-user' \
+            | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          ids = sorted(f['factId'] for f in d['facts'])
+          assert d['headline'] == 'Principal Software Engineer', d['headline']
+          assert ids == ['d1', 'e1', 'e2', 'e3', 'l1', 's1', 's2', 's3'], ids
+          print('profile updated;', len(ids), 'facts')
+          "
+
+      # Both templates, because they exercise different halves of the render
+      # image: ats-plain needs only base LaTeX, altacv-modern needs the extra
+      # package sets and the vendored .cls shipped as an asset.
+      - name: Generate a PDF from each template
+        run: |
+          for template in ats-plain altacv-modern; do
+            echo "── $template ──"
+            job=$(curl -fsS -X POST http://localhost:5100/api/documents \
+              -H 'Content-Type: application/json' \
+              -H 'X-CvMaker-Dev-User: ci-user' \
+              -d "{\"profileId\":\"$(cat /tmp/profile-id)\",\"templateId\":\"$template\"}" \
+              | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+
+            for i in $(seq 1 60); do
+              status=$(curl -fsS "http://localhost:5100/api/jobs/$job" \
+                -H 'X-CvMaker-Dev-User: ci-user' \
+                | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status'],d['stage'],d.get('error') or '')")
+              set -- $status
+              case "$1" in
+                Completed) echo "completed"; break ;;
+                Failed|Cancelled)
+                  # The job row carries the failure cause and message. Print those first:
+                  # the container logs below are long enough to bury them, which is exactly
+                  # what happened while diagnosing this job from CI output alone.
+                  echo "::error::job $job ended $1"
+                  curl -fsS "http://localhost:5100/api/jobs/$job" \
+                    -H 'X-CvMaker-Dev-User: ci-user' | python3 -m json.tool
+                  echo "── worker ──"
+                  docker compose logs --tail 40 api
+                  echo "── renderer ──"
+                  docker compose logs --tail 20 render
+                  exit 1 ;;
+              esac
+              sleep 2
+            done
+
+            if [ "$1" != "Completed" ]; then
+              echo "::error::timed out waiting for $template after 120s (last status: $status)"
+              curl -fsS "http://localhost:5100/api/jobs/$job" \
+                -H 'X-CvMaker-Dev-User: ci-user' | python3 -m json.tool
+              echo "── worker ──"
+              docker compose logs --tail 40 api
+              echo "── renderer ──"
+              docker compose logs --tail 20 render
+              exit 1
+            fi
+
+            curl -fsS "http://localhost:5100/api/jobs/$job/pdf" \
+              -H 'X-CvMaker-Dev-User: ci-user' -o "/tmp/$template.pdf"
+            head -c 4 "/tmp/$template.pdf" | grep -q '%PDF' || { echo "not a PDF"; exit 1; }
+            echo "$template -> $(wc -c < /tmp/$template.pdf) bytes"
+          done
+
+      # Cancel a job the instant it is created, i.e. while it is still queued rather than
+      # running. That is the case the cancellation registry cannot see — it only knows about
+      # jobs already in flight — so the worker has to check the row when it picks the job up.
+      # Without that, the user is told "cancelled" and a PDF is produced anyway.
+      - name: Cancelling a queued job actually stops it
+        run: |
+          job=$(curl -fsS -X POST http://localhost:5100/api/documents \
+            -H 'Content-Type: application/json' \
+            -H 'X-CvMaker-Dev-User: ci-user' \
+            -d "{\"profileId\":\"$(cat /tmp/profile-id)\",\"templateId\":\"ats-plain\"}" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+
+          curl -fsS -X DELETE "http://localhost:5100/api/jobs/$job" \
+            -H 'X-CvMaker-Dev-User: ci-user' -o /dev/null
+
+          # Long enough that a worker ignoring the cancellation would have finished.
+          sleep 30
+
+          status=$(curl -fsS "http://localhost:5100/api/jobs/$job" \
+            -H 'X-CvMaker-Dev-User: ci-user' \
+            | python3 -c "import sys,json;print(json.load(sys.stdin)['status'])")
+
+          [ "$status" = "Cancelled" ] || {
+            echo "::error::Cancelled job ended as $status — the worker ran it anyway"
+            docker compose logs api
+            exit 1
+          }
+
+          # And no PDF: "cancelled" that still leaves a downloadable document is not cancelled.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'X-CvMaker-Dev-User: ci-user' "http://localhost:5100/api/jobs/$job/pdf")
+          [ "$code" = "404" ] || {
+            echo "::error::Cancelled job produced a downloadable PDF (HTTP $code)"
+            exit 1
+          }
+          echo "queued job cancelled, no PDF produced"
+
+      - name: Ownership is enforced
+        run: |
+          # A different user must not see the profile, and must get 404 rather
+          # than 403 — a 403 would confirm the id exists.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'X-CvMaker-Dev-User: someone-else' \
+            "http://localhost:5100/api/profiles/$(cat /tmp/profile-id)")
+          [ "$code" = "404" ] || { echo "expected 404 for another user, got $code"; exit 1; }
+          echo "cross-user read blocked"
+
+      - name: Upload the generated PDFs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-cvs
+          path: /tmp/*.pdf
+          if-no-files-found: warn
+
+      - name: Stack logs
+        if: always()
+        # Bounded. An unbounded dump of every container is ~5000 lines of EF Core command
+        # logging, and it pushed the actual failure out of every window used to read it.
+        run: docker compose logs --tail 30 || true

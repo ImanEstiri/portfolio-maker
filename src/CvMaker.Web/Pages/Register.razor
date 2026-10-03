@@ -1,0 +1,141 @@
+@page "/register"
+@inject AuthClient Auth
+@inject TokenStore Tokens
+@inject ConsentVersions Consent
+@inject NavigationManager Nav
+
+<PageTitle>Create an account</PageTitle>
+<h1>Create an account</h1>
+
+@if (_registered)
+{
+    <p class="notice" role="status">@_notice</p>
+    <p><a href="login">Back to sign in</a></p>
+}
+else
+{
+    <EditForm Model="@_model" OnValidSubmit="@SubmitAsync">
+        <label>
+            Email
+            <InputText @bind-Value="_model.Email" type="email" autocomplete="username" />
+        </label>
+        <label>
+            Password
+            <InputText @bind-Value="_model.Password" type="password" autocomplete="new-password" />
+            <small class="muted">
+                At least 8 characters, with an upper-case letter, a lower-case letter, a digit
+                and a symbol.
+            </small>
+        </label>
+        <label>
+            Confirm password
+            <InputText @bind-Value="_model.Confirm" type="password" autocomplete="new-password" />
+        </label>
+
+        @* Consent is captured at registration and recorded against the version accepted.
+           authservice rejects a registration that does not accept the current versions, and
+           the acceptance is written as an immutable audit row on its side. *@
+        <label class="checkbox">
+            <InputCheckbox @bind-Value="_model.Accepted" />
+            I have read and accept the
+            <a href="terms" target="_blank">Terms of Use</a> (@_versions.Terms) and the
+            <a href="privacy" target="_blank">Privacy Policy</a> (@_versions.Privacy).
+        </label>
+
+        <p class="muted">
+            Your CV content is processed by a third-party model provider to tailor it, and
+            generated PDFs are stored until you delete them. The
+            <a href="privacy" target="_blank">Privacy Policy</a> says exactly what goes where.
+        </p>
+
+        @if (_error is not null)
+        {
+            <p class="error" role="alert">@_error</p>
+        }
+
+        <button type="submit" disabled="@_busy">@(_busy ? "Creating…" : "Create account")</button>
+    </EditForm>
+
+    <p>Already have an account? <a href="@LoginUrl">Sign in</a>.</p>
+}
+
+@code {
+    // The whole registration path. Before this the app had a sign-in form and nothing else:
+    // a stranger could read the marketing copy, list the public templates, and stop, because
+    // everything past that needed a token and there was no way to get one.
+
+    private sealed class Model
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string Confirm { get; set; } = string.Empty;
+        public bool Accepted { get; set; }
+    }
+
+    private readonly Model _model = new();
+    private ConsentVersions.Versions _versions = new("…", "…", "…");
+    private string? _error;
+    private string? _notice;
+    private bool _busy;
+    private bool _registered;
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private string LoginUrl =>
+        string.IsNullOrWhiteSpace(ReturnUrl)
+            ? "login"
+            : $"login?returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+
+    protected override async Task OnInitializedAsync() => _versions = await Consent.GetAsync();
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+
+        // Checked here as well as server-side: a mistyped password the user cannot see is
+        // worth catching before it becomes an account they cannot sign in to.
+        if (_model.Password != _model.Confirm)
+        {
+            _error = "The two passwords do not match.";
+            return;
+        }
+
+        if (!_model.Accepted)
+        {
+            _error = "You need to accept the Terms of Use and Privacy Policy to create an account.";
+            return;
+        }
+
+        _busy = true;
+        var result = await Auth.RegisterAsync(_model.Email, _model.Password);
+        _busy = false;
+
+        switch (result.Outcome)
+        {
+            case AuthOutcome.Succeeded when Tokens.IsAuthenticated:
+                Nav.NavigateTo(Destination());
+                break;
+
+            case AuthOutcome.EmailVerificationRequired:
+                // The account exists but cannot sign in yet. Deliberately a terminal state
+                // with no form to resubmit, rather than bouncing to a sign-in that will fail.
+                _registered = true;
+                _notice = result.Error;
+                break;
+
+            default:
+                _error = result.Error ?? "Could not create the account.";
+                break;
+        }
+    }
+
+    private string Destination()
+    {
+        if (string.IsNullOrWhiteSpace(ReturnUrl)) return "profile";
+
+        return Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "profile";
+    }
+}

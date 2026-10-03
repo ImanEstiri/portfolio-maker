@@ -1,0 +1,63 @@
+name: CodeQL
+
+# Static analysis for the C# code. Without a workflow it only runs when somebody remembers to.
+#
+# What it covers here: the escaper, the renderer's process handling, the token validation and
+# the ownership checks — the code whose failure modes are security failures. Those are also the
+# paths CODEOWNERS singles out.
+#
+# Code scanning is free for public repositories and needs GitHub Advanced Security on private
+# ones. While the repository is private the job is skipped rather than allowed to fail, so a
+# private stage does not leave a red run at the start of the history; it runs from the day the
+# repository is public, with no edit.
+#
+# build-mode: none because the C# extractor can analyse source directly. The alternative is
+# building the solution here, which would pull in the Blazor WebAssembly toolchain to prove
+# nothing the CI workflow does not already prove.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 04:00 UTC. Rule sets change under a codebase that has not.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze C#
+    # `!= true` rather than `== false`: a scheduled run can arrive without a repository object
+    # in its payload, and "unknown" should run, not skip.
+    if: ${{ github.event.repository.private != true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Required for the analyse step to upload its SARIF results.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          build-mode: none
+          # security-extended over security-and-quality: this is a six-project application
+          # rather than a small generator, and a day-one backlog of style findings would
+          # bury the security ones the workflow exists for.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:csharp'

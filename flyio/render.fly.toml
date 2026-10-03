@@ -1,0 +1,38 @@
+# cv-maker renderer (DEV).
+#
+# No [http_service] block and no public IP: the renderer is reachable only over
+# Fly's private 6PN network, from the API. That is the deployable form of the
+# egress/ingress restriction the Dockerfile describes — a compile plane driven
+# by untrusted input should not be addressable from the internet.
+#
+# Sized larger than the other services because the image carries a full-ish TeX
+# Live (~3 GB) and LuaLaTeX is memory-hungry. Slimming the image with tlmgr is
+# the known follow-up; until then cold starts are slow, hence min 1 in prod.
+
+app = "cvmaker-render-dev"
+primary_region = "fra"
+
+[build]
+  dockerfile = "../src/CvMaker.Render/Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+  Render__WorkRoot = "/tmp/cvmaker-render"
+  Render__TimeoutSeconds = "30"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2048mb"

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CvMaker.Core\CvMaker.Core.csproj" />
+    <ProjectReference Include="..\..\src\CvMaker.Shared\CvMaker.Shared.csproj" />
+    <ProjectReference Include="..\..\src\CvMaker.Agentic\CvMaker.Agentic.csproj" />
+    <ProjectReference Include="..\..\src\CvMaker.Api\CvMaker.Api.csproj" />
+  </ItemGroup>
+
+</Project>

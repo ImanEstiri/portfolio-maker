@@ -1,0 +1,132 @@
+%% altacv-modern — two-column CV built on the AltaCV class
+%% (https://github.com/liantze/AltaCV).
+%%
+%% altacv.cls ships in assets/ and is copied into the compile work directory by
+%% the render service, so it sits beside the .tex exactly as it would in a
+%% hand-written document.
+%%
+%% Bound by CvMaker.Core.Binding.TemplateBinder. Every value is ALREADY escaped
+%% — do not add escaping here, and never add a slot that is not on the escaped
+%% view model.
+%%
+%% How this differs from a hand-written AltaCV document, all deliberately:
+%%   * No \photoR — photo upload is not modelled yet, and a missing image file
+%%     is a hard compile error rather than a graceful degradation.
+%%   * No \addbibresource / publications — CvContent has no bibliography model,
+%%     so pulling in biblatex+biber would add a second render pass for nothing.
+%%   * Section placement comes from SectionPlacement rather than being hard
+%%     coded, so Skills-style sections land in the narrow column.
+
+\documentclass[10pt,a4paper,withhyper]{altacv}
+
+\geometry{left=1.25cm,right=1.25cm,top=1.5cm,bottom=1.5cm,columnsep=1.2cm}
+
+\usepackage{paracol}
+\usepackage{needspace}
+
+\iftutex
+  \setmainfont{Roboto Slab}
+  \setsansfont{Lato}
+  \renewcommand{\familydefault}{\sfdefault}
+\else
+  \usepackage[rm]{roboto}
+  \usepackage[defaultsans]{lato}
+  \renewcommand{\familydefault}{\sfdefault}
+\fi
+
+\definecolor{SlateGrey}{HTML}{2E2E2E}
+\definecolor{LightGrey}{HTML}{666666}
+\definecolor{DarkPastelRed}{HTML}{450808}
+\definecolor{PastelRed}{HTML}{8F0D0D}
+\definecolor{GoldenEarth}{HTML}{E7D192}
+\colorlet{name}{black}
+\colorlet{tagline}{PastelRed}
+\colorlet{heading}{DarkPastelRed}
+\colorlet{headingrule}{GoldenEarth}
+\colorlet{subheading}{PastelRed}
+\colorlet{accent}{PastelRed}
+\colorlet{emphasis}{SlateGrey}
+\colorlet{body}{LightGrey}
+
+\renewcommand{\namefont}{\Huge\rmfamily\bfseries}
+\renewcommand{\personalinfofont}{\footnotesize}
+\renewcommand{\cvsectionfont}{\LARGE\rmfamily\bfseries}
+\renewcommand{\cvsubsectionfont}{\large\bfseries}
+
+\renewcommand{\cvItemMarker}{ {\small\textbullet} }
+\renewcommand{\cvRatingMarker}{\faCircle}
+
+\begin{document}
+
+\name{ {{- cv.full_name -}} }
+{{ if cv.headline != "" }}
+\tagline{ {{- cv.headline -}} }
+{{ end }}
+
+\personalinfo{%
+  {{ if cv.email != "" }}\email{ {{- cv.email -}} }{{ end }}
+  {{ if cv.phone != "" }}\phone{ {{- cv.phone -}} }{{ end }}
+  {{ if cv.location != "" }}\location{ {{- cv.location -}} }{{ end }}
+  {{ for link in cv.links }}
+  {{ if link.is_link }}\printinfo{\faLink}{ {{- link.label -}} }[{{ link.url }}]{{ else }}\printinfo{\faLink}{ {{- link.label -}} }{{ end }}
+  {{ end }}
+}
+
+\makecvheader
+
+\columnratio{0.62}
+
+\begin{paracol}{2}
+
+%% ─── MAIN COLUMN ─────────────────────────────────────────────────────────────
+
+{{ if cv.summary != "" }}
+\cvsection{Summary}
+{{ cv.summary }}
+\medskip
+{{ end }}
+
+{{ for section in cv.main_sections }}
+\needspace{4\baselineskip}
+\cvsection{ {{- section.title -}} }
+
+{{ for entry in section.entries }}
+\cvevent{ {{- entry.heading -}} }{ {{- entry.organization -}} }{ {{- entry.date_range -}} }{ {{- entry.location -}} }
+{{ if entry.bullets.size > 0 }}
+\begin{itemize}
+{{ for bullet in entry.bullets }}
+  \item {{ bullet }}
+{{ end }}
+\end{itemize}
+{{ end }}
+{{ if !for.last }}\divider{{ end }}
+{{ end }}
+
+\medskip
+{{ end }}
+
+\switchcolumn
+
+%% ─── SIDE COLUMN ─────────────────────────────────────────────────────────────
+
+{{ for section in cv.side_sections }}
+\needspace{3\baselineskip}
+\cvsection{ {{- section.title -}} }
+
+{{ for entry in section.entries }}
+{{ if entry.heading != "" }}\cvsubsection{ {{- entry.heading -}} }{{ end }}
+{{ if entry.bullets.size > 0 }}
+\begin{itemize}
+{{ for bullet in entry.bullets }}
+  \item {{ bullet }}
+{{ end }}
+\end{itemize}
+{{ end }}
+{{ end }}
+
+\medskip
+{{ end }}
+
+\end{paracol}
+
+\end{document}

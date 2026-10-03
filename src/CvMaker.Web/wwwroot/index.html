@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cv-maker — a CV tailored to the job, without the LaTeX</title>
+    <meta name="description" content="Enter your history once, paste a job posting, get a typeset PDF. Every line cites a fact you entered; content that does not is rejected." />
+    <base href="/" />
+
+    <!-- Link previews. Without these a shared link renders as a bare URL, which reads as
+         broken rather than minimal. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="cv-maker" />
+    <meta property="og:description" content="A CV tailored to the job, without the LaTeX." />
+    <meta name="twitter:card" content="summary" />
+
+    <!-- Inline SVG so there is no second request and no 404 in the console. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f2933'/%3E%3Cpath d='M9 8h10l4 4v12H9z' fill='none' stroke='%23f0f4f8' stroke-width='2'/%3E%3Cpath d='M12 16h8M12 20h5' stroke='%23f0f4f8' stroke-width='2'/%3E%3C/svg%3E" />
+
+    <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+    <div id="app">
+        <div class="boot">Loading…</div>
+    </div>
+
+    <div id="blazor-error-ui">
+        Something went wrong.
+        <a href="" class="reload">Reload</a>
+    </div>
+
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

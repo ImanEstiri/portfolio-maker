@@ -1,0 +1,30 @@
+{
+  "id": "altacv-modern",
+  "displayName": "Modern two-column",
+  "description": "Two-column layout with a coloured header and section rules. Visually strong; parses less reliably in applicant tracking systems than the plain template.",
+  "engine": "lualatex",
+
+  "atsRating": "fair",
+
+  "capabilities": {
+    "photo": false,
+    "twoColumn": true,
+    "publications": false,
+    "skillBars": false,
+    "colourAccent": true,
+    "links": true
+  },
+
+  "pageBudget": {
+    "target": 2,
+    "max": 3
+  },
+
+  "assets": ["altacv.cls"],
+
+  "notes": [
+    "altacv.cls v1.7.4 by LianTze Lim, LPPL — vendored in assets/ and copied into the compile work directory.",
+    "atsRating is 'fair' on purpose: the two-column paracol layout and FontAwesome contact glyphs are exactly what ATS parsers mishandle. The UI should offer the ats-plain variant alongside it.",
+    "Needs a much larger TeX set than ats-plain (tikz, tcolorbox, academicons, simpleicons, pdfx, trimclip, extsizes) — see the render Dockerfile."
+  ]
+}

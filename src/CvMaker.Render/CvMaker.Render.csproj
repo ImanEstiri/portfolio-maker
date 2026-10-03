@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The only service that runs a process driven by untrusted input, and the
+    only one that needs a ~1 GB TeX Live image. Deliberately has no database,
+    no auth and no model credentials: if it is ever compromised, there should
+    be nothing here worth having.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>CvMaker.Render</RootNamespace>
+  </PropertyGroup>
+
+</Project>

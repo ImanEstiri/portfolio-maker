@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# pre-commit — secret scan before anything becomes history.
+#
+# Installed by scripts/setup.sh. Mirrors the CI job in .github/workflows/secret-scan.yml,
+# so a clean commit here means a clean scan there. The hook catches the mistake before it is
+# history; CI catches contributors who never installed the hook.
+#
+# This hook FAILS when no scanner is available. Warning and carrying on would make its
+# protection depend on the contributor's toolchain, which is the same as not having it.
+# `git commit --no-verify` is the escape hatch — deliberately a loud one, and CI still blocks
+# the push.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONFIG="${REPO_ROOT}/.gitleaks.toml"
+
+red()   { printf '\033[0;31m%s\033[0m\n' "$*"; }
+green() { printf '\033[0;32m%s\033[0m\n' "$*"; }
+dim()   { printf '\033[0;90m%s\033[0m\n' "$*"; }
+
+if [ ! -f "${CONFIG}" ]; then
+  red "pre-commit: .gitleaks.toml is missing from the repository root."
+  red "The scanner configuration is not optional. Restore it and retry."
+  exit 1
+fi
+
+# gitleaks 8.19 renamed `protect` to `git` and moved the target from --source to a
+# positional argument. Probing only the subcommand name is not enough: getting half of it
+# right fails with "unknown flag", which would be reported as a finding.
+#
+# Exit 2 means "found something" on purpose. gitleaks exits 1 for a usage error as well as
+# for a finding, so the default would make a broken invocation look like a leaked secret —
+# and a scanner that cries wolf gets bypassed.
+LEAK_EXIT=2
+
+run_native() {
+  if gitleaks git --help >/dev/null 2>&1; then
+    gitleaks git --staged "${REPO_ROOT}" \
+      --config="${CONFIG}" --redact --no-banner --verbose --exit-code "${LEAK_EXIT}"
+  else
+    gitleaks protect --staged --source="${REPO_ROOT}" \
+      --config="${CONFIG}" --redact --no-banner --verbose --exit-code "${LEAK_EXIT}"
+  fi
+}
+
+# The same image CI uses. --staged reads the index, so the whole worktree is mounted.
+run_docker() {
+  local image="zricethezav/gitleaks:latest"
+  if docker run --rm "${image}" git --help >/dev/null 2>&1; then
+    docker run --rm -v "${REPO_ROOT}:/repo" -w /repo "${image}" \
+      git --staged /repo \
+      --config=/repo/.gitleaks.toml --redact --no-banner --verbose --exit-code "${LEAK_EXIT}"
+  else
+    docker run --rm -v "${REPO_ROOT}:/repo" -w /repo "${image}" \
+      protect --staged --source=/repo \
+      --config=/repo/.gitleaks.toml --redact --no-banner --verbose --exit-code "${LEAK_EXIT}"
+  fi
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+  SCANNER=native
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  dim "pre-commit: gitleaks not on PATH; using the container image instead."
+  SCANNER=docker
+else
+  red "pre-commit: no secret scanner available — refusing to commit."
+  echo
+  echo "Install one of:"
+  echo "  • gitleaks   https://github.com/gitleaks/gitleaks#installing"
+  echo "               macOS: brew install gitleaks"
+  echo "  • Docker     the hook uses the same gitleaks image CI does"
+  echo
+  echo "Then commit again."
+  exit 1
+fi
+
+set +e
+case "${SCANNER}" in
+  native) run_native ;;
+  docker) run_docker ;;
+esac
+STATUS=$?
+set -e
+
+if [ "${STATUS}" -eq 0 ]; then
+  green "pre-commit: secret scan clean."
+  exit 0
+fi
+
+if [ "${STATUS}" -ne "${LEAK_EXIT}" ]; then
+  echo
+  red "pre-commit: the secret scanner failed to run (exit ${STATUS}) — commit refused."
+  echo
+  echo "This is a tooling failure, not a finding. The commit is blocked anyway, because a"
+  echo "scanner that did not run proves nothing. Reproduce with more output:"
+  echo "  ./scripts/scan-secrets.sh --staged"
+  exit 1
+fi
+
+echo
+red "pre-commit: secrets detected in staged changes — commit refused."
+echo
+echo "If it is a real secret:"
+echo "  1. Rotate it. It is already on your disk and possibly in your shell history."
+echo "  2. Remove it from the staged change. Configuration comes from the environment,"
+echo "     'dotnet user-secrets' or a gitignored .env — never from a tracked file."
+echo
+echo "If it is a false positive:"
+echo "  • Add a narrow allowlist entry to .gitleaks.toml with a comment saying why."
+echo "  • Never allowlist by pasting the real value into a regex."
+exit 1

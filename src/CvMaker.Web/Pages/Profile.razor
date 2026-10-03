@@ -1,0 +1,186 @@
+@page "/profile"
+@inject CvMakerApiClient Api
+@inject TokenStore Tokens
+
+<PageTitle>Your profile</PageTitle>
+<h1>Your profile</h1>
+
+<RequireAuth Message="Sign in to see and edit your profile.">
+
+    <p class="lede">
+        Everything a generated CV says has to come from something here. Add the detail you would
+        want an employer to see — a bullet per achievement works best.
+    </p>
+
+    @if (_loading)
+    {
+        <p>Loading…</p>
+    }
+    else
+    {
+        <EditForm Model="@_form" OnValidSubmit="@SaveAsync">
+            <fieldset>
+                <legend>Contact</legend>
+                <label>Full name <InputText @bind-Value="_form.FullName" /></label>
+                <label>Headline <InputText @bind-Value="_form.Headline" /></label>
+                <label>Email <InputText @bind-Value="_form.Email" type="email" /></label>
+                <label>Phone <InputText @bind-Value="_form.Phone" /></label>
+                <label>Location <InputText @bind-Value="_form.Location" /></label>
+            </fieldset>
+
+            <fieldset>
+                <legend>History</legend>
+
+                @foreach (var (fact, index) in _form.Facts.Select((f, i) => (f, i)))
+                {
+                    <div class="fact" @key="fact">
+                        <div class="row">
+                            <label>Kind
+                                <InputSelect @bind-Value="fact.Kind">
+                                    @foreach (var kind in Kinds)
+                                    {
+                                        <option value="@kind">@kind</option>
+                                    }
+                                </InputSelect>
+                            </label>
+                            <label>Organisation <InputText @bind-Value="fact.Organization" /></label>
+                            <label>Role <InputText @bind-Value="fact.Role" /></label>
+                        </div>
+                        <div class="row">
+                            <label>From <InputText @bind-Value="fact.StartDate" placeholder="Mar 2019" /></label>
+                            <label>To <InputText @bind-Value="fact.EndDate" placeholder="Present" /></label>
+                            <label>Location <InputText @bind-Value="fact.Location" /></label>
+                        </div>
+                        <label>What you did
+                            <InputTextArea @bind-Value="fact.Text" rows="2" />
+                        </label>
+                        <button type="button" class="link" @onclick="() => _form.Facts.RemoveAt(index)">Remove</button>
+                    </div>
+                }
+
+                <button type="button" @onclick="AddFact">Add an entry</button>
+            </fieldset>
+
+            @if (_message is not null)
+            {
+                <p class="@(_failed ? "error" : "ok")" role="status">@_message</p>
+            }
+
+            <button type="submit" disabled="@_saving">@(_saving ? "Saving…" : "Save profile")</button>
+        </EditForm>
+    }
+
+</RequireAuth>
+
+@code {
+    private static readonly string[] Kinds =
+        ["Employment", "Education", "Skill", "Project", "Publication", "Certification", "Language", "Award", "Other"];
+
+    private sealed class FactForm
+    {
+        public string FactId { get; set; } = string.Empty;
+        public string Kind { get; set; } = "Employment";
+        public string Text { get; set; } = string.Empty;
+        public string? Organization { get; set; }
+        public string? Role { get; set; }
+        public string? Location { get; set; }
+        public string? StartDate { get; set; }
+        public string? EndDate { get; set; }
+    }
+
+    private sealed class ProfileForm
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string? Headline { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? Location { get; set; }
+        public List<FactForm> Facts { get; } = [];
+    }
+
+    private readonly ProfileForm _form = new();
+    private Guid? _profileId;
+    private bool _loading = true, _saving, _failed;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The guard renders a sign-in prompt instead of this page's markup, but a component's
+        // initializer runs either way. Loading here anyway meant a 401 the catch below turned
+        // into "Could not load your profile" — which reads as a server fault to someone whose
+        // only problem is not being signed in.
+        if (!Tokens.IsAuthenticated) return;
+
+        try
+        {
+            var existing = (await Api.GetProfilesAsync()).FirstOrDefault();
+            if (existing is not null)
+            {
+                _profileId = existing.Id;
+                _form.FullName = existing.FullName;
+                _form.Headline = existing.Headline;
+                _form.Email = existing.Email;
+                _form.Phone = existing.Phone;
+                _form.Location = existing.Location;
+
+                foreach (var f in existing.Facts)
+                {
+                    _form.Facts.Add(new FactForm
+                    {
+                        FactId = f.FactId, Kind = f.Kind, Text = f.Text,
+                        Organization = f.Organization, Role = f.Role, Location = f.Location,
+                        StartDate = f.StartDate, EndDate = f.EndDate
+                    });
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+            _message = "Could not load your profile.";
+        }
+
+        if (_form.Facts.Count == 0) AddFact();
+        _loading = false;
+    }
+
+    private void AddFact() => _form.Facts.Add(new FactForm());
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _message = null;
+        _failed = false;
+
+        // Fact ids are assigned here and kept stable across edits, because
+        // generated documents cite them. Reassigning on every save would
+        // orphan the provenance of anything already produced.
+        var index = 0;
+        var facts = _form.Facts
+            .Where(f => !string.IsNullOrWhiteSpace(f.Text))
+            .Select(f => new ProfileFactDto(
+                string.IsNullOrWhiteSpace(f.FactId) ? $"f{index++}-{Guid.NewGuid().ToString("n")[..6]}" : f.FactId,
+                f.Kind, f.Text.Trim(), f.Organization, f.Role, f.Location, f.StartDate, f.EndDate))
+            .ToList();
+
+        var request = new UpsertProfileRequest(
+            _form.FullName, _form.Headline, _form.Email, _form.Phone, _form.Location, null, facts);
+
+        try
+        {
+            var saved = _profileId is { } id
+                ? await Api.UpdateProfileAsync(id, request)
+                : await Api.CreateProfileAsync(request);
+
+            _profileId = saved?.Id ?? _profileId;
+            _message = "Saved.";
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+            _message = "Could not save your profile.";
+        }
+
+        _saving = false;
+    }
+}

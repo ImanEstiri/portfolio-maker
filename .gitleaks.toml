@@ -1,0 +1,18 @@
+# gitleaks configuration.
+#
+# Extends the default rule set rather than replacing it — a hand-written rule list is a
+# list of the secrets someone thought of.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Values that are public by design"
+
+# One value, allowlisted by value rather than by file. Allowlisting docker-compose.yml as a
+# path would also exempt every real secret anyone later pasted into it.
+regexes = [
+  # Azurite's well-known development account key. Published by Microsoft, identical in
+  # every Azurite installation on earth, and useless outside a local emulator.
+  '''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''',
+]
