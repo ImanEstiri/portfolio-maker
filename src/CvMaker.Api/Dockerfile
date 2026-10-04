@@ -7,7 +7,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
-COPY Directory.Build.props ./
+COPY Directory.Build.props Directory.Packages.props ./
 COPY src/CvMaker.Core/CvMaker.Core.csproj src/CvMaker.Core/
 COPY src/CvMaker.Shared/CvMaker.Shared.csproj src/CvMaker.Shared/
 COPY src/CvMaker.Api/CvMaker.Api.csproj src/CvMaker.Api/

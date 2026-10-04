@@ -28,7 +28,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
-COPY Directory.Build.props ./
+COPY Directory.Build.props Directory.Packages.props ./
 COPY src/CvMaker.Render/CvMaker.Render.csproj src/CvMaker.Render/
 RUN dotnet restore src/CvMaker.Render/CvMaker.Render.csproj
 

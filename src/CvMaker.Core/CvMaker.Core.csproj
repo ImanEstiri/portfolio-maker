@@ -11,17 +11,10 @@
 
   <ItemGroup>
     <!--
-      7.x, not 5.x: every 5.x release carries NU1903 advisories, including an
-      unauthenticated OutOfMemoryException crash via unbounded string.pad_left /
-      pad_right (GHSA-v66j-x4hw-fv9g), fixed in 7.0.0.
-
-      Our templates are repo-owned, so a template calling pad_left with a hostile
-      width is not a path an attacker controls today — but this package sits
-      inside the escaping boundary, and shipping a component with four known
-      high-severity advisories to save an upgrade is not a trade worth making.
-      Keep this current, and treat a new NU1903 here as a release blocker.
+      The version, and the NU1903 reasoning behind pinning it at 7.x, lives in
+      Directory.Packages.props.
     -->
-    <PackageReference Include="Scriban" Version="7.2.6" />
+    <PackageReference Include="Scriban" />
   </ItemGroup>
 
 </Project>

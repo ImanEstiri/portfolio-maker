@@ -1,0 +1,45 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="ASP.NET Core / Microsoft.Extensions">
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Authorization" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="Azure">
+    <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.16.0" />
+    <PackageVersion Include="Azure.Storage.Blobs" Version="12.25.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Data access">
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Third-party libraries">
+    <!--
+      7.x, not 5.x: every 5.x release carries NU1903 advisories, including an
+      unauthenticated OutOfMemoryException crash via unbounded string.pad_left /
+      pad_right (GHSA-v66j-x4hw-fv9g), fixed in 7.0.0.
+
+      This package sits inside the escaping boundary in CvMaker.Core. Keep it
+      current, and treat a new NU1903 on it as a release blocker.
+    -->
+    <PackageVersion Include="Scriban" Version="7.2.6" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>
